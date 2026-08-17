@@ -86,7 +86,7 @@ pnpm -C "internal-plugins/setting" dev
 `public/plugin.json` 的开发入口已指向：
 
 ```text
-http://localhost:5177
+http://127.0.0.1:5177
 ```
 
 如果你从主工程整体启动，也可直接运行根目录的开发命令。

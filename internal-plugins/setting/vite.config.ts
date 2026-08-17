@@ -8,6 +8,7 @@ export default defineConfig({
   base: './',
   server: {
     port: 5177, // 设置插件开发服务器端口（避免与主程序 5173 冲突）
+    host: '127.0.0.1',
     strictPort: true,
     open: false
   },

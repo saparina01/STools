@@ -8,7 +8,7 @@
   "main": "index.html",
   "logo": "logo.png",
   "development": {
-    "main": "http://localhost:5177"
+    "main": "http://127.0.0.1:5177"
   },
   "features": [
     {
