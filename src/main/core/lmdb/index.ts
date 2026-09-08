@@ -1,381 +1,216 @@
-import { open } from 'lmdb'
 import { EventEmitter } from 'events'
 import fs from 'fs'
-import { DbDoc, DbResult, LmdbConfig, ChangeEntry, SyncMeta } from './types'
-import { SyncApi } from './syncApi'
+import { open } from 'lmdb'
+import { LocalDocumentApi } from './localDocumentApi'
 import { PromiseApi } from './promiseApi'
+import type { DbDoc, DbResult, LmdbConfig } from './types'
 
 /**
- * LMDB 数据库主类
- * 提供完全兼容 UTools 的数据库 API
- * 继承 EventEmitter，在数据变更时 emit 'change' 事件
+ * 单机 LMDB 文档库，提供兼容 uTools 的同步与 Promise API。
  */
 export default class LmdbDatabase extends EventEmitter {
   private env: any
   private mainDb: any
   private metaDb: any
   private attachmentDb: any
-  private changelogDb: any
-  private revisionDb: any
-  private syncTaskDb: any
-
-  private syncApi: SyncApi
+  private localApi: LocalDocumentApi
   private promiseApi: PromiseApi
 
-  /**
-   * promises 对象，提供所有 Promise 形式的 API
-   */
   public promises: {
     put: (doc: DbDoc) => Promise<DbResult>
     get: (id: string) => Promise<DbDoc | null>
     remove: (docOrId: DbDoc | string) => Promise<DbResult>
-    removeAndResolve: (docOrId: DbDoc | string) => Promise<DbResult>
     bulkDocs: (docs: DbDoc[]) => Promise<DbResult[]>
     allDocs: (key?: string | string[]) => Promise<DbDoc[]>
     postAttachment: (id: string, attachment: Buffer | Uint8Array, type: string) => Promise<DbResult>
     getAttachment: (id: string) => Promise<Uint8Array | null>
-    getAttachmentType: (id: string) => Promise<string | null>
-    getSyncMeta: (id: string) => Promise<SyncMeta | null>
+    getAttachmentType: (id: string) => Promise<any | null>
   }
 
   /**
-   * 构造函数
-   * @param config LMDB 配置对象
+   * 打开单一本地 LMDB 环境及其文档、元数据和附件逻辑库。
+   * @param config LMDB 路径和容量配置。
    */
   constructor(config: LmdbConfig) {
     super()
-
-    // 确保目录存在
-    if (!fs.existsSync(config.path)) {
-      fs.mkdirSync(config.path, { recursive: true })
-    }
-
-    // 打开 LMDB 环境
+    fs.mkdirSync(config.path, { recursive: true })
     this.env = open({
       path: config.path,
-      mapSize: config.mapSize || 2 * 1024 * 1024 * 1024, // 默认 2GB
-      maxDbs: config.maxDbs || 6,
+      mapSize: config.mapSize || 2 * 1024 * 1024 * 1024,
+      maxDbs: config.maxDbs || 3,
       compression: false,
       encoding: 'binary'
     })
-
-    // 打开五个数据库
-    this.mainDb = this.env.openDB({
-      name: 'main',
-      encoding: 'string'
-    })
-
-    this.metaDb = this.env.openDB({
-      name: 'meta',
-      encoding: 'string'
-    })
-
-    this.attachmentDb = this.env.openDB({
-      name: 'attachment',
-      encoding: 'binary'
-    })
-
-    this.changelogDb = this.env.openDB({
-      name: 'changelog',
-      encoding: 'string'
-    })
-
-    this.revisionDb = this.env.openDB({
-      name: 'revision',
-      encoding: 'string'
-    })
-
-    this.syncTaskDb = this.env.openDB({
-      name: 'syncTask',
-      encoding: 'string'
-    })
-
-    // 初始化 API（传入 changelogDb、revisionDb 和 emitter）
-    this.syncApi = new SyncApi(
+    this.mainDb = this.env.openDB({ name: 'main', encoding: 'string' })
+    this.metaDb = this.env.openDB({ name: 'meta', encoding: 'string' })
+    this.attachmentDb = this.env.openDB({ name: 'attachment', encoding: 'binary' })
+    this.localApi = new LocalDocumentApi(
       this.env,
       this.mainDb,
       this.metaDb,
       this.attachmentDb,
-      this.changelogDb,
-      this.revisionDb,
       this
     )
-    this.promiseApi = new PromiseApi(this.syncApi)
-
-    // 设置 promises 对象
+    this.promiseApi = new PromiseApi(this.localApi)
     this.promises = {
-      put: (doc: DbDoc) => this.promiseApi.put(doc),
-      get: (id: string) => this.promiseApi.get(id),
-      remove: (docOrId: DbDoc | string) => this.promiseApi.remove(docOrId),
-      removeAndResolve: (docOrId: DbDoc | string) => this.promiseApi.removeAndResolve(docOrId),
-      bulkDocs: (docs: DbDoc[]) => this.promiseApi.bulkDocs(docs),
-      allDocs: (key?: string | string[]) => this.promiseApi.allDocs(key),
-      postAttachment: (id: string, attachment: Buffer | Uint8Array, type: string) =>
+      put: (doc) => this.promiseApi.put(doc),
+      get: (id) => this.promiseApi.get(id),
+      remove: (docOrId) => this.promiseApi.remove(docOrId),
+      bulkDocs: (docs) => this.promiseApi.bulkDocs(docs),
+      allDocs: (key) => this.promiseApi.allDocs(key),
+      postAttachment: (id, attachment, type) =>
         this.promiseApi.postAttachment(id, attachment, type),
-      getAttachment: (id: string) => this.promiseApi.getAttachment(id),
-      getAttachmentType: (id: string) => this.promiseApi.getAttachmentType(id),
-      getSyncMeta: (id: string) => this.promiseApi.getSyncMeta(id)
+      getAttachment: (id) => this.promiseApi.getAttachment(id),
+      getAttachmentType: (id) => this.promiseApi.getAttachmentType(id)
     }
   }
 
-  // ==================== 同步 API ====================
-
   /**
-   * 创建或更新文档（同步）
-   * @param doc 文档对象，必须包含 _id
-   * @returns 操作结果
+   * 创建或更新文档。
+   * @param doc 待保存文档。
+   * @returns 写入结果。
    */
-  put(doc: DbDoc): DbResult {
-    return this.syncApi.put(doc)
+  public put(doc: DbDoc): DbResult {
+    return this.localApi.put(doc)
   }
 
   /**
-   * 根据 ID 获取文档（同步）
-   * @param id 文档 ID
-   * @returns 文档对象，不存在返回 null
+   * 读取文档。
+   * @param id 文档 ID。
+   * @returns 文档或 null。
    */
-  get(id: string): DbDoc | null {
-    return this.syncApi.get(id)
+  public get(id: string): DbDoc | null {
+    return this.localApi.get(id)
   }
 
   /**
-   * 删除文档（同步）
-   * @param docOrId 文档对象或文档 ID
-   * @returns 操作结果
+   * 删除文档。
+   * @param docOrId 文档或 ID。
+   * @returns 删除结果。
    */
-  remove(docOrId: DbDoc | string): DbResult {
-    return this.syncApi.remove(docOrId)
-  }
-
-  removeAndResolve(docOrId: DbDoc | string): DbResult {
-    return this.syncApi.removeAndResolve(docOrId)
+  public remove(docOrId: DbDoc | string): DbResult {
+    return this.localApi.remove(docOrId)
   }
 
   /**
-   * 批量创建或更新文档（同步）
-   * @param docs 文档对象数组
-   * @returns 操作结果数组
+   * 批量写入文档。
+   * @param docs 文档数组。
+   * @returns 批量写入结果。
    */
-  bulkDocs(docs: DbDoc[]): DbResult[] {
-    return this.syncApi.bulkDocs(docs)
+  public bulkDocs(docs: DbDoc[]): DbResult[] {
+    return this.localApi.bulkDocs(docs)
   }
 
   /**
-   * 获取文档数组（同步）
-   * @param key 可选的文档 ID 前缀（字符串）或文档 ID 数组
-   * @returns 文档对象数组
+   * 按前缀或 ID 数组读取文档。
+   * @param key ID 数组或前缀。
+   * @returns 匹配文档。
    */
-  allDocs(key?: string | string[]): DbDoc[] {
-    return this.syncApi.allDocs(key)
+  public allDocs(key?: string | string[]): DbDoc[] {
+    return this.localApi.allDocs(key)
   }
 
   /**
-   * 存储附件（同步）
-   * @param id 文档 ID
-   * @param attachment 附件数据（Buffer 或 Uint8Array）
-   * @param type MIME 类型
-   * @returns 操作结果
+   * 保存附件。
+   * @param id 关联文档 ID。
+   * @param attachment 附件字节。
+   * @param type MIME 类型。
+   * @returns 写入结果。
    */
-  postAttachment(id: string, attachment: Buffer | Uint8Array, type: string): DbResult {
-    return this.syncApi.postAttachment(id, attachment, type)
-  }
-
-  putAttachmentFromRemote(id: string, attachment: Buffer | Uint8Array, type: string): DbResult {
-    return this.syncApi.putAttachmentFromRemote(id, attachment, type)
-  }
-
-  getSyncMeta(id: string): SyncMeta | null {
-    return this.syncApi.getSyncMeta(id)
-  }
-
-  removeAttachment(id: string): void {
-    return this.syncApi.removeAttachment(id)
-  }
-
-  removeAttachmentSilent(id: string): void {
-    return this.syncApi.removeAttachmentSilent(id)
+  public postAttachment(id: string, attachment: Buffer | Uint8Array, type: string): DbResult {
+    return this.localApi.postAttachment(id, attachment, type)
   }
 
   /**
-   * 获取附件（同步）
-   * @param id 附件文档 ID
-   * @returns 附件数据（Uint8Array），不存在返回 null
+   * 删除附件并更新关联文档。
+   * @param id 关联文档 ID。
+   * @returns 无返回值。
    */
-  getAttachment(id: string): Uint8Array | null {
-    return this.syncApi.getAttachment(id)
+  public removeAttachment(id: string): void {
+    this.localApi.removeAttachment(id)
   }
 
   /**
-   * 获取附件元数据（同步）
-   * @param id 附件文档 ID
-   * @returns 附件元数据对象，不存在返回 null
+   * 仅删除附件记录。
+   * @param id 关联文档 ID。
+   * @returns 无返回值。
    */
-  getAttachmentType(id: string): any | null {
-    return this.syncApi.getAttachmentType(id)
+  public removeAttachmentSilent(id: string): void {
+    this.localApi.removeAttachmentSilent(id)
   }
 
-  // ==================== 实用方法 ====================
+  /**
+   * 读取附件。
+   * @param id 关联文档 ID。
+   * @returns 附件字节或 null。
+   */
+  public getAttachment(id: string): Uint8Array | null {
+    return this.localApi.getAttachment(id)
+  }
 
   /**
-   * 获取附件数据库实例（用于高级查询）
-   * @returns 附件数据库实例
+   * 读取附件元数据。
+   * @param id 关联文档 ID。
+   * @returns 附件元数据或 null。
    */
-  getAttachmentDb(): any {
+  public getAttachmentType(id: string): any | null {
+    return this.localApi.getAttachmentType(id)
+  }
+
+  /**
+   * 返回附件逻辑库供本地数据维护使用。
+   * @returns 附件逻辑库。
+   */
+  public getAttachmentDb(): any {
     return this.attachmentDb
   }
 
   /**
-   * 获取元数据数据库实例（用于高级查询）
-   * @returns 元数据数据库实例
+   * 返回元数据逻辑库供本地数据维护使用。
+   * @returns 元数据逻辑库。
    */
-  getMetaDb(): any {
+  public getMetaDb(): any {
     return this.metaDb
   }
 
   /**
-   * 获取 changelog 数据库实例
+   * 关闭 LMDB 环境。
+   * @returns 无返回值。
    */
-  getChangelogDb(): any {
-    return this.changelogDb
-  }
-
-  getRevisionDb(): any {
-    return this.revisionDb
-  }
-
-  getSyncTaskDb(): any {
-    return this.syncTaskDb
-  }
-
-  // ==================== Changelog API ====================
-
-  /**
-   * 获取从指定序列号之后的所有变更
-   */
-  getChangesSince(sinceSeq: number): ChangeEntry[] {
-    return this.syncApi.getChangesSince(sinceSeq)
-  }
-
-  /**
-   * 获取当前最大序列号
-   */
-  getLastSeq(): number {
-    return this.syncApi.getLastSeq()
-  }
-
-  getRevisionHistory(docId: string, rev?: string | null, maxDepth?: number): string[] {
-    return this.syncApi.getRevisionHistory(docId, rev, maxDepth)
-  }
-
-  /**
-   * 应用远端文档（跳过 _rev 冲突检测）
-   */
-  applyRemoteDoc(doc: DbDoc): DbResult {
-    return this.syncApi.applyRemoteDoc(doc)
-  }
-
-  applyRemoteChange(change: {
-    docId: string
-    rev?: string
-    parentRev?: string | null
-    revisionHistory?: string[]
-    deleted: boolean
-    timestamp?: number
-    doc?: DbDoc | null
-    resolution?: { retireOtherLeaves?: boolean }
-  }): DbResult {
-    return this.syncApi.applyRemoteChange(change)
-  }
-
-  /**
-   * 批量应用远端变更（单事务，性能优化）
-   */
-  applyRemoteBatch(
-    changes: {
-      doc?: DbDoc | null
-      docId: string
-      rev?: string
-      parentRev?: string | null
-      revisionHistory?: string[]
-      deleted: boolean
-      timestamp?: number
-    }[]
-  ): number {
-    return this.syncApi.applyRemoteBatch(changes)
-  }
-
-  /**
-   * 获取文档的冲突版本列表（远端/本地各执一词时保留的失败版本）
-   */
-  getConflicts(docId: string): DbDoc[] {
-    return this.syncApi.getConflicts(docId)
-  }
-
-  resolveConflict(docId: string, sourceRev: string): DbResult {
-    return this.syncApi.resolveConflict(docId, sourceRev)
-  }
-
-  /**
-   * 清除文档的冲突记录
-   */
-  clearConflicts(docId: string): void {
-    this.syncApi.clearConflicts(docId)
-  }
-
-  listAttachments(): Array<{ docId: string; md5: string; contentType: string }> {
-    return this.syncApi.listAttachments()
-  }
-
-  /**
-   * 应用远端删除（跳过 _rev 检测）
-   */
-  applyRemoteRemove(docId: string): DbResult {
-    return this.syncApi.applyRemoteRemove(docId)
-  }
-
-  /**
-   * 清理已确认的 changelog
-   */
-  compactChangelog(upToSeq: number): void {
-    this.syncApi.compactChangelog(upToSeq)
-  }
-
-  /**
-   * 关闭数据库
-   */
-  close(): void {
+  public close(): void {
     try {
       this.env.close()
-    } catch (e) {
-      console.error('[LMDB] Error closing LMDB:', e)
+    } catch (error) {
+      console.error('[LMDB] Error closing LMDB:', error)
     }
   }
 
   /**
-   * 获取数据库统计信息
+   * 获取三个本地逻辑库的统计信息。
+   * @returns 逻辑库统计信息。
    */
-  getStats(): any {
+  public getStats(): any {
     try {
       return {
         main: this.mainDb.getStats?.() || {},
         meta: this.metaDb.getStats?.() || {},
-        attachment: this.attachmentDb.getStats?.() || {},
-        changelog: this.changelogDb.getStats?.() || {}
+        attachment: this.attachmentDb.getStats?.() || {}
       }
-    } catch (e) {
-      console.error('[LMDB] Error getting stats:', e)
+    } catch (error) {
+      console.error('[LMDB] Error getting stats:', error)
       return {}
     }
   }
 
   /**
-   * 同步数据到磁盘
+   * 将待处理数据刷新到磁盘。
+   * @returns 无返回值。
    */
-  sync(): void {
+  public sync(): void {
     try {
       this.env.sync()
-    } catch (e) {
-      console.error('[LMDB] Error syncing LMDB:', e)
+    } catch (error) {
+      console.error('[LMDB] Error syncing LMDB:', error)
     }
   }
 }

@@ -22,8 +22,6 @@ import windowAPI from '../renderer/window.js'
 import pluginToolsAPI from './tools'
 import databaseAPI from '../shared/database'
 import { analyzeImage } from '../shared/imageAnalysis'
-import updaterAPI from '../updater.js'
-import notificationsAPI from '../renderer/notifications.js'
 import {
   COMMAND_ALIASES_KEY,
   normalizeCommandAliases,
@@ -413,81 +411,6 @@ export class InternalPluginAPI {
       }
     )
 
-    ipcMain.handle(
-      'internal:fetch-plugin-market-comments',
-      async (event, pluginName: string, page?: number, pageSize?: number, anchorId?: number) => {
-        if (!requireInternalPlugin(this.pluginManager, event)) {
-          throw new PermissionDeniedError('internal:fetch-plugin-market-comments')
-        }
-        return await pluginsAPI.market.fetchComments(pluginName, page, pageSize, anchorId)
-      }
-    )
-
-    ipcMain.handle(
-      'internal:create-plugin-market-comment',
-      async (event, input: { pluginName: string; content: string; parentId?: number | null }) => {
-        if (!requireInternalPlugin(this.pluginManager, event)) {
-          throw new PermissionDeniedError('internal:create-plugin-market-comment')
-        }
-        return await pluginsAPI.market.createComment(input)
-      }
-    )
-
-    ipcMain.handle(
-      'internal:toggle-plugin-market-comment-like',
-      async (event, commentId: number) => {
-        if (!requireInternalPlugin(this.pluginManager, event)) {
-          throw new PermissionDeniedError('internal:toggle-plugin-market-comment-like')
-        }
-        return await pluginsAPI.market.toggleCommentLike(commentId)
-      }
-    )
-
-    ipcMain.handle('internal:delete-plugin-market-comment', async (event, commentId: number) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:delete-plugin-market-comment')
-      }
-      return await pluginsAPI.market.deleteComment(commentId)
-    })
-
-    ipcMain.handle('internal:notification-summary', async (event) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:notification-summary')
-      }
-      return await notificationsAPI.summary()
-    })
-
-    ipcMain.handle(
-      'internal:notification-list',
-      async (event, beforeId?: number, limit?: number, unreadOnly?: boolean) => {
-        if (!requireInternalPlugin(this.pluginManager, event)) {
-          throw new PermissionDeniedError('internal:notification-list')
-        }
-        return await notificationsAPI.list(beforeId, limit, unreadOnly)
-      }
-    )
-
-    ipcMain.handle('internal:notification-mark-read', async (event, id: number) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:notification-mark-read')
-      }
-      return await notificationsAPI.markRead(id)
-    })
-
-    ipcMain.handle('internal:notification-mark-all-read', async (event) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:notification-mark-all-read')
-      }
-      return await notificationsAPI.markAllRead()
-    })
-
-    ipcMain.handle('internal:notification-archive', async (event, id: number) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:notification-archive')
-      }
-      return await notificationsAPI.archive(id)
-    })
-
     ipcMain.handle('internal:install-plugin-from-market', async (event, plugin: any) => {
       if (!requireInternalPlugin(this.pluginManager, event)) {
         throw new PermissionDeniedError('internal:install-plugin-from-market')
@@ -670,12 +593,12 @@ export class InternalPluginAPI {
 
     ipcMain.handle(
       'internal:ai-providers-fetch-models',
-      async (event, apiUrl: string, apiKey: string) => {
+      async (event, apiUrl: string, apiKey?: string, providerId?: string) => {
         if (!requireInternalPlugin(this.pluginManager, event)) {
           throw new PermissionDeniedError('internal:ai-providers-fetch-models')
         }
         try {
-          const data = await aiModelsAPI.fetchModels(apiUrl, apiKey)
+          const data = await aiModelsAPI.fetchModels(apiUrl, apiKey, providerId)
           return { success: true, data }
         } catch (error: unknown) {
           return {
@@ -900,13 +823,6 @@ export class InternalPluginAPI {
       return await settingsAPI.setWindowDefaultHeight(height)
     })
 
-    ipcMain.handle('internal:select-avatar', async (event) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:select-avatar')
-      }
-      return await systemAPI.selectAvatar()
-    })
-
     ipcMain.handle('internal:select-image-file', async (event) => {
       if (!requireInternalPlugin(this.pluginManager, event)) {
         throw new PermissionDeniedError('internal:select-image-file')
@@ -984,20 +900,6 @@ export class InternalPluginAPI {
       }
       // 广播到主渲染进程
       this.mainWindow?.webContents.send('update-placeholder', placeholder)
-      return { success: true }
-    })
-
-    // 通知主渲染进程更新头像
-    ipcMain.handle('internal:update-avatar', async (event, avatar: string) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:update-avatar')
-      }
-      // 广播到主渲染进程
-      this.mainWindow?.webContents.send('update-avatar', avatar)
-
-      // 广播到超级面板窗口
-      superPanelManager.broadcastToSuperPanel('update-avatar', avatar)
-
       return { success: true }
     })
 
@@ -1218,29 +1120,6 @@ export class InternalPluginAPI {
         return
       }
       event.returnValue = process.platform
-    })
-
-    // ==================== 应用更新 API ====================
-    ipcMain.handle('internal:updater-check-update', async (event) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:updater-check-update')
-      }
-      return await updaterAPI.checkUpdate()
-    })
-
-    ipcMain.handle('internal:updater-start-update', async (event) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:updater-start-update')
-      }
-      return await updaterAPI.startUpdate()
-    })
-
-    ipcMain.handle('internal:updater-set-auto-check', async (event, enabled: boolean) => {
-      if (!requireInternalPlugin(this.pluginManager, event)) {
-        throw new PermissionDeniedError('internal:updater-set-auto-check')
-      }
-      updaterAPI.setAutoCheck(enabled)
-      return { success: true }
     })
 
     // ==================== 其他 API ====================

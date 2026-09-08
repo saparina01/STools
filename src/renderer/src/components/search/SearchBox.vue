@@ -147,148 +147,37 @@
         <span class="tab-target-text">{{ tabHintText }}</span>
         <span class="tab-target-key">Tab</span>
       </div>
-      <!-- 更新提示 -->
-      <div v-if="windowStore.shouldShowUpdateNotification" class="update-notification">
-        <button class="update-action" type="button" @click="handleUpdateClick">
-          <span class="update-text">发现新版本，点击更新</span>
-          <UpdateIcon />
-        </button>
-        <button
-          class="update-dismiss"
-          type="button"
-          title="关闭本次提示"
-          aria-label="关闭更新提示"
-          @click="handleDismissUpdateNotification"
-        >
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
-      <!-- 当前插件存在市场新版本时显示，展开层向左覆盖以避免右侧图标位移。 -->
-      <div v-if="hasPluginUpdate" class="plugin-upgrade-slot">
-        <div
-          class="plugin-upgrade-control"
-          :class="{
-            upgrading: pluginUpdateStatus === 'upgrading',
-            error: pluginUpdateStatus === 'error'
-          }"
-          :title="pluginUpgradeTitle"
-        >
-          <div class="plugin-upgrade-actions">
-            <button
-              type="button"
-              class="plugin-upgrade-action market-action"
-              :disabled="pluginUpdateStatus === 'upgrading'"
-              @click.stop="handleOpenPluginMarket"
-            >
-              进入市场查看
-            </button>
-            <button
-              type="button"
-              class="plugin-upgrade-action upgrade-now-action"
-              :disabled="pluginUpdateStatus === 'upgrading'"
-              @click.stop="handleUpgradePlugin"
-            >
-              {{ pluginUpgradeActionText }}
-            </button>
-          </div>
-          <button
-            type="button"
-            class="plugin-upgrade-trigger"
-            :aria-label="pluginUpgradeTitle"
-            @click.stop
-          >
-            <PluginUpgradeIcon />
-          </button>
-        </div>
-      </div>
-      <!-- 头像按钮（无更新或插件模式时显示） -->
-      <div
-        v-if="!windowStore.shouldShowUpdateNotification"
-        class="avatar-wrapper"
-        :class="{
-          loading: isPluginLoading,
-          'is-default': isDefaultAvatar,
-          'ai-sending': windowStore.aiRequestStatus === 'sending',
-          'ai-receiving': windowStore.aiRequestStatus === 'receiving'
-        }"
+      <button
+        class="settings-action"
+        type="button"
+        :title="windowStore.currentPlugin ? '插件操作' : '打开设置'"
         @click="handleSettingsClick"
       >
-        <!-- 插件模式下显示操作提示图标 -->
-        <div v-if="windowStore.currentPlugin" class="action-indicator">
-          <svg
-            width="4"
-            height="18"
-            viewBox="0 0 4 18"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <circle cx="2" cy="2" r="2" fill="currentColor" opacity="0.7" />
-            <circle cx="2" cy="9" r="2" fill="currentColor" opacity="0.7" />
-            <circle cx="2" cy="16" r="2" fill="currentColor" opacity="0.7" />
-          </svg>
-        </div>
-        <!-- 头像容器（包含头像、动画层、加载动画）-->
-        <div class="avatar-container">
-          <!-- AI 状态动画层 -->
-          <div v-if="windowStore.aiRequestStatus !== 'idle'" class="ai-animation-layer">
-            <!-- 蒙版层 -->
-            <div class="ai-mask"></div>
-            <!-- AI 文字 -->
-            <div class="ai-text">AI</div>
-            <!-- 发送状态：同心圆向外扩散 -->
-            <div v-if="windowStore.aiRequestStatus === 'sending'" class="ai-ripple-container"></div>
-            <!-- 接收状态：边缘向内收缩 -->
-            <div
-              v-if="windowStore.aiRequestStatus === 'receiving'"
-              class="ai-pulse-container"
-            ></div>
-          </div>
-          <AdaptiveIcon
-            :src="avatarUrl"
-            :force-adaptive="false"
-            :class="[
-              'search-btn',
-              { 'plugin-logo': windowStore.currentPlugin?.logo && !isPluginLoading },
-              { 'is-default': isDefaultAvatar }
-            ]"
-            draggable="false"
-          />
-          <div v-if="isPluginLoading" class="avatar-spinner"></div>
-        </div>
-      </div>
+        <span v-if="isPluginLoading" class="settings-action-spinner" />
+        <span v-else-if="windowStore.aiRequestStatus !== 'idle'" class="settings-action-ai"
+          >AI</span
+        >
+        <span v-else class="i-z-more" />
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import PluginUpgradeIcon from '@renderer/assets/icons/plugin-upgrade.svg?component'
 import { normalizeConfigList } from '@shared/pluginSettings'
 import {
   resolveMainPushMenuState,
   toggleMainPushSetting
 } from '../../composables/useMainPushSetting'
-import { DEFAULT_AVATAR, useWindowStore } from '../../stores/windowStore'
+import { useWindowStore } from '../../stores/windowStore'
 import AdaptiveIcon from '../common/AdaptiveIcon.vue'
-import UpdateIcon from './UpdateIcon.vue'
 
 // FileItem 接口（从剪贴板管理器返回的格式）
 interface FileItem {
   path: string
   name: string
   isDirectory: boolean
-}
-
-type PluginUpdateStatus = 'idle' | 'available' | 'upgrading' | 'error'
-
-interface PluginMarketDownloadProgress {
-  pluginName: string
-  taskId: string
-  status: 'downloading' | 'installing' | 'success' | 'error' | 'cancelled'
-  progress: number | null
-  receivedBytes?: number
-  totalBytes?: number
-  error?: string
 }
 
 const props = defineProps<{
@@ -374,161 +263,7 @@ const currentPlaceholder = computed(() => {
   // 否则显示完整的占位符文字
   return placeholderText.value
 })
-const avatarUrl = computed(() => {
-  // 优先显示插件图标
-  if (windowStore.currentPlugin?.logo) {
-    return windowStore.currentPlugin.logo
-  }
-  // 否则显示用户头像
-  return windowStore.avatar
-})
-
-// 判断是否是默认头像
-const isDefaultAvatar = computed(() => {
-  // 使用严格相等判断，而不是字符串包含判断
-  // 这样在打包后路径被处理时也能正确判断
-  return avatarUrl.value === DEFAULT_AVATAR
-})
-
 const isPluginLoading = computed(() => windowStore.pluginLoading)
-const pluginUpdateStatus = ref<PluginUpdateStatus>('idle')
-const pluginUpdateName = ref('')
-const pluginCurrentVersion = ref('')
-const pluginLatestVersion = ref('')
-const pluginUpgradeProgress = ref<number | null>(null)
-const pluginUpgradeError = ref('')
-let pluginUpdateRequestSequence = 0
-
-const hasPluginUpdate = computed(
-  () =>
-    !!windowStore.currentPlugin &&
-    pluginUpdateName.value === windowStore.currentPlugin.name &&
-    pluginUpdateStatus.value !== 'idle'
-)
-const pluginUpgradeActionText = computed(() => {
-  if (pluginUpdateStatus.value === 'error') return '重试升级'
-  if (pluginUpdateStatus.value !== 'upgrading') return '立即升级'
-  if (pluginUpgradeProgress.value != null) {
-    return `升级 ${Math.round(pluginUpgradeProgress.value)}%`
-  }
-  return '正在安装'
-})
-const pluginUpgradeTitle = computed(() => {
-  if (pluginUpgradeError.value) return pluginUpgradeError.value
-  return `发现新版本 ${pluginLatestVersion.value}，当前版本 ${pluginCurrentVersion.value}`
-})
-
-/**
- * 清空当前插件的更新展示状态。
- * @returns 无返回值
- */
-function resetPluginUpdateState(): void {
-  pluginUpdateStatus.value = 'idle'
-  pluginUpdateName.value = ''
-  pluginCurrentVersion.value = ''
-  pluginLatestVersion.value = ''
-  pluginUpgradeProgress.value = null
-  pluginUpgradeError.value = ''
-}
-
-/**
- * 异步检查当前插件的市场版本，并丢弃插件切换后到达的过期响应。
- * @returns 检查完成后结束的 Promise
- */
-async function checkCurrentPluginUpdate(): Promise<void> {
-  const plugin = windowStore.currentPlugin
-  const requestSequence = ++pluginUpdateRequestSequence
-  resetPluginUpdateState()
-  if (!plugin) return
-
-  try {
-    const result = await window.ztools.pluginUpdates.check(plugin.name, plugin.path)
-    // 插件切换后不允许旧请求覆盖新插件的界面状态。
-    if (
-      requestSequence !== pluginUpdateRequestSequence ||
-      windowStore.currentPlugin?.name !== plugin.name ||
-      windowStore.currentPlugin?.path !== plugin.path
-    ) {
-      return
-    }
-    if (!result.success || !result.updateAvailable || !result.latestVersion) return
-
-    pluginUpdateName.value = plugin.name
-    pluginCurrentVersion.value = result.currentVersion || ''
-    pluginLatestVersion.value = result.latestVersion
-    pluginUpdateStatus.value = 'available'
-  } catch (error: unknown) {
-    // 更新检查失败不应干扰插件正常打开，只保留调试日志。
-    console.debug('[PluginUpdate] 检查更新失败:', error)
-  }
-}
-
-/**
- * 打开当前插件对应的市场详情页。
- * @returns 操作完成后结束的 Promise
- */
-async function handleOpenPluginMarket(): Promise<void> {
-  const pluginName = pluginUpdateName.value
-  if (!pluginName || pluginUpdateStatus.value === 'upgrading') return
-
-  try {
-    const result = await window.ztools.pluginUpdates.openMarket(pluginName)
-    if (!result.success) {
-      alert(`打开插件市场失败: ${result.error || '未知错误'}`)
-    }
-  } catch (error: unknown) {
-    alert(`打开插件市场失败: ${error instanceof Error ? error.message : '未知错误'}`)
-  }
-}
-
-/**
- * 立即下载并安装当前插件的市场最新版本。
- * @returns 升级完成后结束的 Promise
- */
-async function handleUpgradePlugin(): Promise<void> {
-  const pluginName = pluginUpdateName.value
-  const pluginPath = windowStore.currentPlugin?.path
-  if (!pluginName || !pluginPath || pluginUpdateStatus.value === 'upgrading') return
-
-  // 安装器会先准备新实体，发布前才停止当前插件。
-  pluginUpdateStatus.value = 'upgrading'
-  pluginUpgradeProgress.value = null
-  pluginUpgradeError.value = ''
-  try {
-    const result = await window.ztools.pluginUpdates.upgrade(pluginName, pluginPath)
-    if (!result.success) {
-      pluginUpdateStatus.value = 'error'
-      pluginUpgradeError.value = result.error || '升级失败'
-      alert(`插件升级失败: ${pluginUpgradeError.value}`)
-    } else {
-      resetPluginUpdateState()
-    }
-  } catch (error: unknown) {
-    pluginUpdateStatus.value = 'error'
-    pluginUpgradeError.value = error instanceof Error ? error.message : '升级失败'
-    alert(`插件升级失败: ${pluginUpgradeError.value}`)
-  }
-}
-
-/**
- * 将主进程发送的市场下载进度同步到当前升级控件。
- * @param payload 下载或安装阶段的进度数据
- * @returns 无返回值
- */
-function handlePluginUpgradeProgress(payload: PluginMarketDownloadProgress): void {
-  if (payload.pluginName !== pluginUpdateName.value) return
-
-  if (payload.status === 'downloading') {
-    pluginUpgradeProgress.value = payload.progress
-  } else if (payload.status === 'installing') {
-    pluginUpgradeProgress.value = null
-  } else if (payload.status === 'error' || payload.status === 'cancelled') {
-    pluginUpdateStatus.value = 'error'
-    pluginUpgradeError.value =
-      payload.error || (payload.status === 'cancelled' ? '升级已取消' : '升级失败')
-  }
-}
-
 // Tab 键功能提示文字
 const tabHintText = computed(() => {
   if (windowStore.tabKeyFunction === 'navigate') {
@@ -1025,14 +760,12 @@ watch(
   () => windowStore.currentPlugin,
   () => {
     updateInputWidth()
-    void checkCurrentPluginUpdate()
   }
 )
 
 // 用于清理的 ResizeObserver
 let resizeObserver: ResizeObserver | null = null
 let cleanupContextMenuListener: (() => void) | null = null
-let cleanupPluginUpdateProgressListener: (() => void) | null = null
 
 onMounted(() => {
   // 初始化输入框宽度（updateInputWidth 内部会根据是否有内容来决定宽度）
@@ -1060,12 +793,6 @@ onMounted(() => {
   window.ztools.onAiStatusChanged?.((status: 'idle' | 'sending' | 'receiving') => {
     windowStore.setAiRequestStatus(status)
   })
-
-  // 升级进度只监听当前主窗口发起的市场安装任务。
-  cleanupPluginUpdateProgressListener = window.ztools.pluginUpdates.onProgress(
-    handlePluginUpgradeProgress
-  )
-  void checkCurrentPluginUpdate()
 
   // 监听菜单命令
   cleanupContextMenuListener?.()
@@ -1230,37 +957,13 @@ async function handleSettingsClick(): Promise<void> {
   }
 }
 
-async function handleUpdateClick(): Promise<void> {
-  try {
-    const result = await window.ztools.updater.showUpdateWindow()
-    if (!result.success) {
-      alert(`打开更新窗口失败: ${result.error}`)
-    }
-  } catch (error: any) {
-    console.error('打开更新窗口失败:', error)
-    alert(`打开更新窗口失败: ${error.message || '未知错误'}`)
-  }
-}
-
-/**
- * 关闭当前版本的更新提示，关闭状态仅在本次应用运行期间有效。
- * @returns 无返回值
- */
-function handleDismissUpdateNotification(): void {
-  windowStore.dismissUpdateNotification()
-}
-
 onUnmounted(() => {
-  // 使仍在途中的版本查询结果失效。
-  pluginUpdateRequestSequence++
   resizeObserver?.disconnect()
   cleanupDrag()
 
   // 清理右键菜单命令监听
   cleanupContextMenuListener?.()
   cleanupContextMenuListener = null
-  cleanupPluginUpdateProgressListener?.()
-  cleanupPluginUpdateProgressListener = null
 
   // 清理拖放事件监听
   if (searchBoxRef.value) {
@@ -1636,7 +1339,47 @@ defineExpose({
   align-items: center;
   gap: 8px;
   flex-shrink: 0; /* 右侧按钮区域不允许缩小 */
-  -webkit-app-region: no-drag; /* 头像区域不可拖动 */
+  -webkit-app-region: no-drag;
+}
+
+.settings-action {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.settings-action:hover {
+  background: var(--hover-bg);
+  color: var(--text-color);
+}
+
+.settings-action-ai {
+  color: var(--primary-color);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.settings-action-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--text-color) 20%, transparent);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: settings-action-spin 0.8s linear infinite;
+}
+
+@keyframes settings-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .plugin-upgrade-slot {
@@ -1808,176 +1551,6 @@ defineExpose({
   border-radius: 4px;
   padding: 1px 5px;
   line-height: 1.3;
-}
-
-.update-notification {
-  position: relative;
-  display: flex;
-  align-items: center;
-  overflow: visible;
-  border-radius: 8px;
-  background: rgba(16, 185, 129, 0.1);
-  transition: background 0.2s;
-  -webkit-app-region: no-drag;
-}
-
-.update-notification:hover {
-  background: rgba(16, 185, 129, 0.2);
-}
-
-.update-action,
-.update-dismiss {
-  border: none;
-  background: transparent;
-  color: #10b981;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-}
-
-.update-action {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px 6px 12px;
-}
-
-.update-action:active {
-  opacity: 0.7;
-}
-
-.update-dismiss {
-  position: absolute;
-  z-index: 1;
-  top: -5px;
-  right: -5px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border-radius: 4px;
-  font-size: 16px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-  transform: scale(0.85);
-  transition:
-    opacity 0.15s,
-    transform 0.15s;
-}
-
-.update-notification:hover .update-dismiss,
-.update-dismiss:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: scale(1);
-}
-
-.update-dismiss:hover {
-  background: rgba(16, 185, 129, 0.24);
-}
-
-.update-action:focus-visible,
-.update-dismiss:focus-visible {
-  outline: 2px solid #10b981;
-  outline-offset: -2px;
-}
-
-.update-text {
-  font-size: 13px;
-  color: #10b981;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.search-btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  object-fit: cover;
-  cursor: pointer;
-  transition: all 0.2s;
-  -webkit-app-region: no-drag;
-  /* 按钮不可拖动 */
-  border: none;
-  outline: none;
-  position: relative;
-  z-index: 1;
-}
-
-/* 插件图标：保持原本形状，不使用圆形遮罩 */
-.search-btn.plugin-logo {
-  border-radius: 6px;
-  object-fit: contain;
-}
-
-.search-btn:not(.plugin-logo):hover {
-  transform: scale(0.96);
-  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--primary-color), transparent 60%);
-}
-
-.search-btn:active {
-  transform: scale(0.95);
-}
-
-.avatar-wrapper {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.avatar-container {
-  position: relative;
-  width: 38px;
-  height: 38px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.avatar-wrapper.loading .search-btn {
-  opacity: 0.9;
-}
-
-.action-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-  opacity: 0.6;
-  transition: opacity 0.2s;
-}
-
-.avatar-wrapper:hover .action-indicator {
-  opacity: 1;
-}
-
-.search-btn.is-default {
-  opacity: 1;
-}
-
-.avatar-spinner {
-  position: absolute;
-  right: -4px;
-  width: 46px;
-  height: 46px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: var(--primary-color, #3b82f6);
-  animation: avatar-spin 0.8s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes avatar-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* AI 动画层 */

@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast, AdaptiveIcon } from '@/components'
 import type { PluginUninstallOptions } from '@/components'
 import { PluginDetail, NpmInstallPanel } from './components'
-import { compareVersions, upgradeInstalledPluginFromMarket, weightedSearch } from '@/utils'
+import { weightedSearch } from '@/utils'
 import { useJumpFunction, useZtoolsSubInput } from '@/composables'
 import { jumpFunctionPluginMarketSetting } from '@/views/PluginMarketSetting/PluginMarketSetting'
 import { useRouter } from 'vue-router'
@@ -12,7 +12,7 @@ import { useRouter } from 'vue-router'
 //   (e: 'add-dev-consumed'): void
 // }>()
 
-const { success, error, warning, info, confirm } = useToast()
+const { success, error, warning, confirm } = useToast()
 
 // 插件相关状态
 const plugins = ref<any[]>([])
@@ -25,13 +25,6 @@ const isDeleting = ref(false)
 const isKilling = ref(false)
 const isKillingAll = ref(false)
 const isExportingAll = ref(false)
-const isCheckingMarketUpdates = ref(false)
-// 是否正在执行“全部更新”
-const isUpgradingAll = ref(false)
-// “全部更新”当前完成数（用于进度展示）
-const upgradeProgressDone = ref(0)
-// “全部更新”总任务数（用于进度展示）
-const upgradeProgressTotal = ref(0)
 
 // npm 安装相关状态
 const showNpmPanel = ref(false)
@@ -43,7 +36,7 @@ const selectedPlugin = ref<any | null>(null)
 const npmInstallPanelRef = ref<InstanceType<typeof NpmInstallPanel>>()
 
 // 过滤状态
-const filterStatus = ref<'all' | 'running' | 'upgradable'>('all')
+const filterStatus = ref<'all' | 'running'>('all')
 
 // 置顶列表（插件 path 有序数组，持久化到 db）
 const PINNED_PLUGINS_KEY = 'plugin-center-pinned'
@@ -74,29 +67,11 @@ const runningPluginsCount = computed(() => {
   return runningFilteredPlugins.value.length
 })
 
-// 可升级插件（以已安装插件与插件市场版本比对）
-const upgradablePlugins = computed(() => {
-  return plugins.value.filter((p) => p.hasUpdate && p.marketPlugin)
-})
-
-// 可更新插件列表（经过搜索过滤，用于「更新」栏目）
-const upgradableFilteredPlugins = computed(() => {
-  return searchFilteredPlugins.value.filter((p) => p.hasUpdate && p.marketPlugin)
-})
-
-// 「更新」栏目显示的数量（经过搜索过滤）
-const upgradableTabCount = computed(() => upgradableFilteredPlugins.value.length)
-
-// 可升级插件数量（用于菜单显示与批量更新）
-const upgradablePluginsCount = computed(() => upgradablePlugins.value.length)
-
 // 最终显示的插件列表（根据状态过滤，置顶的排在最前）
 const filteredPlugins = computed(() => {
   let list = searchFilteredPlugins.value
   if (filterStatus.value === 'running') {
     list = list.filter((p) => isPluginRunning(p.path))
-  } else if (filterStatus.value === 'upgradable') {
-    list = upgradableFilteredPlugins.value
   }
   const pinnedOrder = pinnedPluginPaths.value
   if (pinnedOrder.length === 0) return list
@@ -149,26 +124,20 @@ async function loadPlugins(): Promise<void> {
   } finally {
     isLoading.value = false
   }
-
-  // 异步获取市场数据，补充更新信息（不阻塞列表展示）
-  void checkMarketUpdates()
 }
 
-// 将已安装插件列表按安装时间排序并设置初始字段
-function buildPluginList(installedPlugins: any[], marketPluginMap?: Map<string, any>): any[] {
+/**
+ * 将本机已安装插件补充展示字段，并按安装时间倒序排列。
+ * @param installedPlugins 从本地主进程读取的插件列表。
+ * @returns 可供已安装插件页面直接渲染的列表。
+ */
+function buildPluginList(installedPlugins: any[]): any[] {
   return installedPlugins
     .map((plugin: any) => {
-      const market = marketPluginMap?.get(plugin.name)
       return {
         ...plugin,
         installed: true,
-        localVersion: plugin.version,
-        latestVersion: market?.version,
-        marketPlugin: market,
-        hasUpdate:
-          !plugin.isDevelopment &&
-          !!market?.version &&
-          compareVersions(plugin.version, market.version) < 0
+        localVersion: plugin.version
       }
     })
     .sort((a: any, b: any) => {
@@ -176,133 +145,6 @@ function buildPluginList(installedPlugins: any[], marketPluginMap?: Map<string, 
       const timeB = b.installedAt ? new Date(b.installedAt).getTime() : 0
       return timeB - timeA
     })
-}
-
-// 市场更新检查序列号，防止并发请求导致过时数据覆盖
-let marketCheckSeq = 0
-
-// 异步检查市场更新，补充 hasUpdate / marketPlugin 等字段
-async function checkMarketUpdates(): Promise<void> {
-  const seq = ++marketCheckSeq
-  isCheckingMarketUpdates.value = true
-  try {
-    const marketResult = await window.ztools.internal.fetchPluginMarket()
-    if (seq !== marketCheckSeq) return // 已被新调用取代，丢弃结果
-    if (!marketResult.success || !Array.isArray(marketResult.data)) return
-
-    const currentPlatform = window.ztools.internal.getPlatform()
-    const marketPluginMap = new Map<string, any>()
-    for (const marketPlugin of marketResult.data) {
-      if (!marketPlugin?.name) continue
-      if (
-        Array.isArray(marketPlugin.platform) &&
-        !marketPlugin.platform.includes(currentPlatform)
-      ) {
-        continue
-      }
-      marketPluginMap.set(marketPlugin.name, marketPlugin)
-    }
-
-    // 用市场信息重新构建列表（剥离旧的市场字段后重新赋值）
-    plugins.value = buildPluginList(
-      plugins.value.map((p: any) => {
-        const { latestVersion: _lv, marketPlugin: _mp, hasUpdate: _hu, ...rest } = p
-        return rest
-      }),
-      marketPluginMap
-    )
-    if (selectedPlugin.value) {
-      const updated = plugins.value.find((p: any) => p.path === selectedPlugin.value?.path)
-      if (updated) {
-        selectedPlugin.value = updated
-      }
-    }
-  } catch (err) {
-    console.error('检查市场更新失败:', err)
-  } finally {
-    if (seq === marketCheckSeq) {
-      isCheckingMarketUpdates.value = false
-    }
-  }
-}
-
-// 将单个已安装插件升级到市场最新版本（复用公共升级逻辑）
-async function upgradePluginToLatest(plugin: any): Promise<{ success: boolean; error?: string }> {
-  return upgradeInstalledPluginFromMarket(
-    { name: plugin.name, path: plugin.path },
-    plugin.marketPlugin
-  )
-}
-
-/**
- * 批量升级可更新插件
- * 逐个更新并实时反馈进度，完成后统一刷新列表与提示结果
- */
-async function handleUpgradeAllPlugins(): Promise<void> {
-  const targets = upgradablePlugins.value
-  if (isUpgradingAll.value || targets.length === 0) return
-
-  const confirmed = await confirm({
-    title: '全部更新插件',
-    message: `检测到 ${targets.length} 个可更新插件，是否立即全部更新？`,
-    type: 'warning',
-    confirmText: '全部更新',
-    cancelText: '取消'
-  })
-  if (!confirmed) return
-
-  isUpgradingAll.value = true
-  upgradeProgressDone.value = 0
-  upgradeProgressTotal.value = targets.length
-  showMoreMenu.value = false
-
-  let successCount = 0
-  let failCount = 0
-  const failedNames: string[] = []
-
-  try {
-    console.log('开始批量更新插件:', {
-      total: targets.length,
-      names: targets.map((p) => p.name)
-    })
-    for (let i = 0; i < targets.length; i++) {
-      const plugin = targets[i]
-      const displayName = plugin.title || plugin.name
-      console.log(`批量更新进度 ${i + 1}/${targets.length}:`, displayName)
-      info(`正在更新 ${i + 1}/${targets.length}: ${displayName}`, 1400)
-
-      const result = await upgradePluginToLatest(plugin)
-      if (result.success) {
-        successCount++
-      } else {
-        failCount++
-        failedNames.push(displayName)
-        console.error(`[批量更新] 更新失败: ${displayName}`, result.error)
-      }
-      upgradeProgressDone.value = i + 1
-    }
-
-    await loadPlugins()
-
-    if (failCount === 0) {
-      console.log('批量更新完成，全部成功:', successCount)
-      success(`全部更新完成（共 ${successCount} 个）`)
-    } else if (successCount === 0) {
-      console.warn('批量更新完成，全部失败:', failCount)
-      error(`全部更新失败（共 ${failCount} 个）`)
-    } else {
-      console.warn('批量更新完成，部分失败:', { successCount, failCount })
-      warning(`部分更新失败：成功 ${successCount} 个，失败 ${failCount} 个`)
-      console.warn('[批量更新] 失败插件:', failedNames.join(', '))
-    }
-  } catch (err: any) {
-    console.error('批量更新插件失败:', err)
-    error(`批量更新失败: ${err.message || '未知错误'}`)
-  } finally {
-    isUpgradingAll.value = false
-    upgradeProgressDone.value = 0
-    upgradeProgressTotal.value = 0
-  }
 }
 
 // 加载运行中的插件
@@ -719,16 +561,6 @@ async function handleInstallFromNpm(data: {
               运行中
               <span class="tab-count">{{ runningPluginsCount }}</span>
             </button>
-            <button
-              class="tab-btn"
-              :class="{ active: filterStatus === 'upgradable' }"
-              @click="filterStatus = 'upgradable'"
-            >
-              更新
-              <span class="tab-count" :class="{ 'tab-count-update': upgradableTabCount > 0 }">
-                {{ upgradableTabCount }}
-              </span>
-            </button>
           </div>
           <div class="button-group">
             <div class="more-menu-wrapper">
@@ -788,24 +620,6 @@ async function handleInstallFromNpm(data: {
                     <line x1="12" y1="15" x2="12" y2="3"></line>
                   </svg>
                   {{ isImportingNpm ? '安装中...' : '从 npm 安装' }}
-                </button>
-                <button
-                  class="more-menu-item"
-                  :disabled="
-                    isUpgradingAll || isCheckingMarketUpdates || upgradablePluginsCount === 0
-                  "
-                  @click="handleUpgradeAllPlugins"
-                >
-                  <div class="i-z-refresh font-size-16px" />
-                  {{
-                    isCheckingMarketUpdates
-                      ? '检测更新中...'
-                      : isUpgradingAll
-                        ? `更新中... ${upgradeProgressDone}/${upgradeProgressTotal}`
-                        : upgradablePluginsCount > 0
-                          ? `全部更新 (${upgradablePluginsCount})`
-                          : '暂无可更新'
-                  }}
                 </button>
                 <button
                   class="more-menu-item"
@@ -873,11 +687,6 @@ async function handleInstallFromNpm(data: {
               />
               <div v-else class="plugin-icon-placeholder">🧩</div>
               <span v-if="plugin.isDevelopment" class="plugin-dev-badge">DEV</span>
-              <span
-                v-if="plugin.hasUpdate"
-                class="plugin-update-dot"
-                :title="`有新版本 v${plugin.latestVersion}`"
-              ></span>
             </div>
 
             <div class="plugin-info">
@@ -988,24 +797,6 @@ async function handleInstallFromNpm(data: {
             <div class="empty-hint">点击"导入本地插件"来安装你的第一个插件</div>
           </div>
 
-          <!-- 更新栏目为空 -->
-          <div
-            v-else-if="
-              !isLoading &&
-              plugins.length > 0 &&
-              filteredPlugins.length === 0 &&
-              filterStatus === 'upgradable' &&
-              !searchQuery
-            "
-            class="empty-state"
-          >
-            <div class="i-z-plugin empty-icon font-size-64px" />
-            <div class="empty-text">
-              {{ isCheckingMarketUpdates ? '正在检测更新...' : '全部插件均为最新版本' }}
-            </div>
-            <div v-if="!isCheckingMarketUpdates" class="empty-hint">有新版本的插件会出现在这里</div>
-          </div>
-
           <!-- 搜索无结果 -->
           <div
             v-else-if="!isLoading && plugins.length > 0 && filteredPlugins.length === 0"
@@ -1027,7 +818,7 @@ async function handleInstallFromNpm(data: {
         :is-running="isPluginRunning(selectedPlugin.path)"
         :is-pinned="isPluginPinned(selectedPlugin.path)"
         :is-disabled="isPluginDisabled(selectedPlugin.path)"
-        :show-market-button="!!selectedPlugin.marketPlugin"
+        :show-market-button="!selectedPlugin.isDevelopment"
         @back="closePluginDetail"
         @open="handleOpenPlugin(selectedPlugin)"
         @uninstall="handleUninstallFromDetail(selectedPlugin, $event)"

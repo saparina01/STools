@@ -36,32 +36,6 @@ interface SuperPanelWindowInfo {
 
 interface FileLocationWindowInfo extends SuperPanelWindowInfo {}
 
-interface PluginUpdateCheckResult {
-  success: boolean
-  updateAvailable: boolean
-  currentVersion?: string
-  latestVersion?: string
-  plugin?: {
-    name: string
-    version: string
-    title?: string
-    logo?: string
-    updatedAt?: number
-  }
-  reason?: string
-  error?: string
-}
-
-interface PluginMarketDownloadProgress {
-  pluginName: string
-  taskId: string
-  status: 'downloading' | 'installing' | 'success' | 'error' | 'cancelled'
-  progress: number | null
-  receivedBytes?: number
-  totalBytes?: number
-  error?: string
-}
-
 declare global {
   interface Window {
     electron: {
@@ -125,20 +99,6 @@ declare global {
         enabled: boolean
       ) => Promise<{ success: boolean; error?: string }>
       killPluginAndReturn: (pluginPath: string) => Promise<{ success: boolean; error?: string }>
-      pluginUpdates: {
-        check: (pluginName: string, pluginPath: string) => Promise<PluginUpdateCheckResult>
-        upgrade: (
-          pluginName: string,
-          pluginPath: string
-        ) => Promise<{
-          success: boolean
-          error?: string
-          plugin?: any
-          cancelled?: boolean
-        }>
-        openMarket: (pluginName: string) => Promise<{ success: boolean; error?: string }>
-        onProgress: (callback: (payload: PluginMarketDownloadProgress) => void) => () => void
-      }
       // mainPush 功能
       queryMainPush: (
         pluginPath: string,
@@ -280,7 +240,6 @@ declare global {
       // 设置插件通知主渲染进程的事件
       openSettings: () => void
       onUpdatePlaceholder: (callback: (placeholder: string) => void) => void
-      onUpdateAvatar: (callback: (avatar: string) => void) => void
       onUpdateSearchWallpaper: (
         callback: (wallpaper: SearchWallpaperConfig | null) => void
       ) => () => void
@@ -303,38 +262,6 @@ declare global {
       onUpdateAcrylicOpacity?: (
         callback: (data: { lightOpacity: number; darkOpacity: number }) => void
       ) => void
-      // 软件更新
-      updater: {
-        checkUpdate: () => Promise<{
-          hasUpdate: boolean
-          currentVersion?: string
-          latestVersion?: string
-          updateInfo?: any
-          migrationRequired?: boolean
-          migrationReasons?: string[]
-          releaseUrl?: string
-          error?: string
-        }>
-        showUpdateWindow: () => Promise<{ success: boolean; error?: string }>
-        startUpdate: (
-          sourceID?: number
-        ) => Promise<{ success: boolean; cancelled?: boolean; error?: string }>
-        cancelUpdate: () => Promise<{ success: boolean; cancelled?: boolean; error?: string }>
-        openDownloadSource: (sourceID: number) => Promise<{ success: boolean; error?: string }>
-        installDownloadedUpdate: () => Promise<{ success: boolean; error?: string }>
-        getDownloadStatus: () => Promise<{
-          hasUpdate: boolean
-          hasDownloaded: boolean
-          version?: string
-          changelog?: string
-          status?: string
-        }>
-      }
-      onUpdateAvailable: (callback: (data: { version: string; changelog: string }) => void) => void
-      onAutoCheckUpdateChanged: (callback: (enabled: boolean) => void) => () => void
-      onUpdateDownloaded: (callback: (data: { version: string; changelog: string }) => void) => void
-      onUpdateDownloadStart: (callback: (data: { version: string }) => void) => void
-      onUpdateDownloadFailed: (callback: (data: { error: string }) => void) => void
       getPlatform: () => string
       // 上次匹配状态管理
       getLastMatchState: () => Promise<LastMatchState | null>

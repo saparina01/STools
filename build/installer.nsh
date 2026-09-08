@@ -1,11 +1,3 @@
-!macro customInstall
-  Delete "$INSTDIR\ztools-agent.exe"
-  Delete "$INSTDIR\ztools-updater.exe"
-  FileOpen $0 "$INSTDIR\resources\.ztools-nsis-installed" w
-  FileWrite $0 "electron-updater-nsis"
-  FileClose $0
-!macroend
-
 !macro customUnInstall
   # 覆盖升级也会执行卸载段，仅在用户主动卸载时清理开机启动项。
   ${ifNot} ${isUpdated}

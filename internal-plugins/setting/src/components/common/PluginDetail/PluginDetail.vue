@@ -21,7 +21,6 @@ const props = withDefaults(
     showDisableToggle?: boolean
     showDetail?: boolean
     showCommands?: boolean
-    showComments?: boolean
     showData?: boolean
     showSize?: boolean
     showDownloadCount?: boolean
@@ -95,7 +94,6 @@ const {
   plugin: pluginRef,
   isRunning: isRunningRef,
   showDetail: props.showDetail,
-  showComments: props.showComments,
   showCommands: props.showCommands,
   showData: props.showData,
   initialTab: props.initialTab

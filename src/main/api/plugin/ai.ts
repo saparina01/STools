@@ -2,8 +2,11 @@ import { ipcMain } from 'electron'
 import type { PluginManager } from '../../managers/pluginManager'
 import OpenAI from 'openai'
 import detachedWindowManager from '../../core/detachedWindowManager'
-import aiProviderService, { type ResolvedAiModel } from '../../core/aiProviderService.js'
-import type { AiModelChoice, AiProvider } from '../../../shared/aiProviderShared.js'
+import aiProviderService, {
+  type ResolvedAiModel,
+  type ResolvedAiProvider
+} from '../../core/aiProviderService.js'
+import type { AiModelChoice } from '../../../shared/aiProviderShared.js'
 
 /**
  * AI 选项
@@ -211,7 +214,7 @@ class PluginAiAPI {
    * @param provider 已解析的供应商连接配置
    * @returns OpenAI SDK 客户端
    */
-  private createClient(provider: AiProvider): OpenAI {
+  private createClient(provider: ResolvedAiProvider): OpenAI {
     return new OpenAI({
       apiKey: provider.apiKey,
       baseURL: provider.apiUrl

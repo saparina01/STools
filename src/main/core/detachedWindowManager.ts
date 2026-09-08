@@ -31,14 +31,6 @@ interface DetachedWindowInfo {
   savedFocusTarget: 'titlebar' | 'plugin' // 窗口失焦时快照的焦点状态
 }
 
-export interface DetachedPluginUpgradeSnapshot {
-  windowId: string
-  pluginName: string
-  pluginPath: string
-  width: number
-  viewHeight: number
-}
-
 /**
  * 分离窗口管理器 - 专门管理从主窗口分离出来的插件窗口
  */
@@ -46,7 +38,6 @@ class DetachedWindowManager {
   private detachedWindowMap: Map<string, DetachedWindowInfo> = new Map()
   private resizeSaveTimers: Map<string, NodeJS.Timeout> = new Map()
   private lastSavedSizeByPlugin: Map<string, { width: number; height: number }> = new Map()
-  private suppressedSizePersistenceWindows = new Set<string>()
 
   /**
    * 应用窗口材质（Windows 11）
@@ -268,15 +259,12 @@ class DetachedWindowManager {
             height: newBounds.height - DETACHED_TITLEBAR_HEIGHT
           })
 
-          // 升级期间的 0 高度是临时状态，不得覆盖用户保存的窗口尺寸。
-          if (!this.suppressedSizePersistenceWindows.has(windowId)) {
-            this.schedulePersistWindowSize(
-              windowId,
-              pluginName,
-              newBounds.width,
-              newBounds.height - DETACHED_TITLEBAR_HEIGHT
-            )
-          }
+          this.schedulePersistWindowSize(
+            windowId,
+            pluginName,
+            newBounds.width,
+            newBounds.height - DETACHED_TITLEBAR_HEIGHT
+          )
         }
       })
 
@@ -296,7 +284,6 @@ class DetachedWindowManager {
       // 监听窗口关闭
       win.on('closed', () => {
         this.detachedWindowMap.delete(windowId)
-        this.suppressedSizePersistenceWindows.delete(windowId)
         const timer = this.resizeSaveTimers.get(windowId)
         if (timer) {
           clearTimeout(timer)
@@ -520,83 +507,6 @@ class DetachedWindowManager {
       }
     }
     return null
-  }
-
-  /**
-   * 保存指定独立窗口的尺寸，并将插件内容区收起到 0 高度等待升级。
-   * @param pluginName 需要升级的插件名称
-   * @param pluginPath 当前插件物理路径
-   * @param webContents 发起升级的独立标题栏 WebContents
-   * @returns 独立窗口升级快照；调用来源或插件不匹配时返回 null
-   */
-  public collapsePluginForUpgrade(
-    pluginName: string,
-    pluginPath: string,
-    webContents: Electron.WebContents
-  ): DetachedPluginUpgradeSnapshot | null {
-    for (const [windowId, info] of this.detachedWindowMap.entries()) {
-      if (
-        info.window.isDestroyed() ||
-        info.window.webContents.id !== webContents.id ||
-        info.pluginName !== pluginName ||
-        info.pluginPath !== pluginPath
-      ) {
-        continue
-      }
-
-      // 先保存真实内容尺寸，再抑制升级收起动作触发的尺寸持久化。
-      const bounds = info.window.getContentBounds()
-      const snapshot: DetachedPluginUpgradeSnapshot = {
-        windowId,
-        pluginName,
-        pluginPath,
-        width: bounds.width,
-        viewHeight: Math.max(0, bounds.height - DETACHED_TITLEBAR_HEIGHT)
-      }
-      this.suppressedSizePersistenceWindows.add(windowId)
-
-      // 保留标题栏及升级进度，隐藏即将被替换的插件内容。
-      info.view.setBounds({
-        x: 0,
-        y: DETACHED_TITLEBAR_HEIGHT,
-        width: bounds.width,
-        height: 0
-      })
-      info.window.setContentSize(bounds.width, DETACHED_TITLEBAR_HEIGHT)
-      return snapshot
-    }
-
-    return null
-  }
-
-  /**
-   * 在升级失败且旧独立窗口仍存活时恢复原插件内容高度。
-   * @param snapshot 升级开始前保存的独立窗口快照
-   * @returns 是否成功恢复原独立窗口
-   */
-  public restorePluginAfterFailedUpgrade(snapshot: DetachedPluginUpgradeSnapshot): boolean {
-    const info = this.detachedWindowMap.get(snapshot.windowId)
-    if (
-      !info ||
-      info.window.isDestroyed() ||
-      info.pluginName !== snapshot.pluginName ||
-      info.pluginPath !== snapshot.pluginPath
-    ) {
-      return false
-    }
-
-    // 恢复前解除持久化抑制，让原始尺寸继续作为用户窗口尺寸保存。
-    this.suppressedSizePersistenceWindows.delete(snapshot.windowId)
-    info.window.setContentSize(snapshot.width, snapshot.viewHeight + DETACHED_TITLEBAR_HEIGHT)
-    info.view.setBounds({
-      x: 0,
-      y: DETACHED_TITLEBAR_HEIGHT,
-      width: snapshot.width,
-      height: snapshot.viewHeight
-    })
-    info.window.show()
-    info.window.focus()
-    return true
   }
 
   /**

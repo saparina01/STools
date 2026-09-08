@@ -1,273 +1,106 @@
-import { DbDoc, DbResult, ChangeEntry, SyncMeta } from './types'
-import { SyncApi } from './syncApi'
+import type { DbDoc, DbResult } from './types'
+import type { LocalDocumentApi } from './localDocumentApi'
 
 /**
- * Promise API 实现类（完全兼容 UTools）
- * 将同步 API 包装为 Promise 形式
+ * 将本地同步文档操作调度到下一轮事件循环，并提供 Promise 形式 API。
  */
 export class PromiseApi {
-  constructor(private syncApi: SyncApi) {}
+  /**
+   * 创建 Promise API。
+   * @param localApi 本地同步文档 API。
+   */
+  constructor(private localApi: LocalDocumentApi) {}
 
   /**
-   * 创建或更新文档（异步）
-   * @param doc 文档对象，必须包含 _id
-   * @returns Promise<操作结果>
+   * 异步保存文档。
+   * @param doc 待保存文档。
+   * @returns 写入结果 Promise。
    */
-  async put(doc: DbDoc): Promise<DbResult> {
-    // 使用 setImmediate 将操作放到下一个事件循环，避免阻塞
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const result = this.syncApi.put(doc)
-          resolve(result)
-        } catch (e) {
-          console.error('[LMDB] put error:', e)
-          reject(e)
-        }
-      })
-    })
+  public async put(doc: DbDoc): Promise<DbResult> {
+    return this.defer(() => this.localApi.put(doc))
   }
 
   /**
-   * 根据 ID 获取文档（异步）
-   * @param id 文档 ID
-   * @returns Promise<文档对象>，不存在返回 null
+   * 异步读取文档。
+   * @param id 文档 ID。
+   * @returns 文档或 null 的 Promise。
    */
-  async get(id: string): Promise<DbDoc | null> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          // console.log('lmdb get', id)
-          const result = this.syncApi.get(id)
-          // console.log('lmdb get result', result)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+  public async get(id: string): Promise<DbDoc | null> {
+    return this.defer(() => this.localApi.get(id))
   }
 
   /**
-   * 删除文档（异步）
-   * @param docOrId 文档对象或文档 ID
-   * @returns Promise<操作结果>
+   * 异步删除文档。
+   * @param docOrId 文档或 ID。
+   * @returns 删除结果 Promise。
    */
-  async remove(docOrId: DbDoc | string): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const result = this.syncApi.remove(docOrId)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async removeAndResolve(docOrId: DbDoc | string): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const result = this.syncApi.removeAndResolve(docOrId)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+  public async remove(docOrId: DbDoc | string): Promise<DbResult> {
+    return this.defer(() => this.localApi.remove(docOrId))
   }
 
   /**
-   * 批量创建或更新文档（异步）
-   * @param docs 文档对象数组
-   * @returns Promise<操作结果数组>
+   * 异步批量写入文档。
+   * @param docs 文档数组。
+   * @returns 批量写入结果 Promise。
    */
-  async bulkDocs(docs: DbDoc[]): Promise<DbResult[]> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const results = this.syncApi.bulkDocs(docs)
-          resolve(results)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+  public async bulkDocs(docs: DbDoc[]): Promise<DbResult[]> {
+    return this.defer(() => this.localApi.bulkDocs(docs))
   }
 
   /**
-   * 获取文档数组（异步）
-   * @param key 可选的文档 ID 前缀（字符串）或文档 ID 数组
-   * @returns Promise<文档对象数组>
+   * 异步读取匹配文档。
+   * @param key ID 数组或前缀。
+   * @returns 匹配文档 Promise。
    */
-  async allDocs(key?: string | string[]): Promise<DbDoc[]> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const results = this.syncApi.allDocs(key)
-          resolve(results)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+  public async allDocs(key?: string | string[]): Promise<DbDoc[]> {
+    return this.defer(() => this.localApi.allDocs(key))
   }
 
   /**
-   * 存储附件（异步）
-   * @param id 文档 ID
-   * @param attachment 附件数据（Buffer 或 Uint8Array）
-   * @param type MIME 类型
-   * @returns Promise<操作结果>
+   * 异步保存附件。
+   * @param id 关联文档 ID。
+   * @param attachment 附件字节。
+   * @param type MIME 类型。
+   * @returns 写入结果 Promise。
    */
-  async postAttachment(
+  public async postAttachment(
     id: string,
     attachment: Buffer | Uint8Array,
     type: string
   ): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const result = this.syncApi.postAttachment(id, attachment, type)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+    return this.defer(() => this.localApi.postAttachment(id, attachment, type))
   }
 
   /**
-   * 获取附件（异步）
-   * @param id 附件文档 ID
-   * @returns Promise<附件数据（Uint8Array）>，不存在返回 null
+   * 异步读取附件。
+   * @param id 关联文档 ID。
+   * @returns 附件字节或 null 的 Promise。
    */
-  async getAttachment(id: string): Promise<Uint8Array | null> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const result = this.syncApi.getAttachment(id)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+  public async getAttachment(id: string): Promise<Uint8Array | null> {
+    return this.defer(() => this.localApi.getAttachment(id))
   }
 
   /**
-   * 获取附件元数据（异步）
-   * @param id 附件文档 ID
-   * @returns Promise<附件元数据对象>，不存在返回 null
+   * 异步读取附件元数据。
+   * @param id 关联文档 ID。
+   * @returns 附件元数据或 null 的 Promise。
    */
-  async getAttachmentType(id: string): Promise<any | null> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          const result = this.syncApi.getAttachmentType(id)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
+  public async getAttachmentType(id: string): Promise<any | null> {
+    return this.defer(() => this.localApi.getAttachmentType(id))
   }
 
   /**
-   * 获取文档的同步元数据（异步）
-   * @param id 文档 ID
-   * @returns Promise<同步元数据对象>，不存在返回 null
+   * 将同步操作推迟到下一轮事件循环。
+   * @param operation 要执行的同步操作。
+   * @returns 操作结果 Promise。
    */
-  async getSyncMeta(id: string): Promise<SyncMeta | null> {
+  private defer<T>(operation: () => T): Promise<T> {
     return new Promise((resolve, reject) => {
       setImmediate(() => {
         try {
-          const result = this.syncApi.getSyncMeta(id)
-          resolve(result)
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async getChangesSince(sinceSeq: number): Promise<ChangeEntry[]> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          resolve(this.syncApi.getChangesSince(sinceSeq))
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async getLastSeq(): Promise<number> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          resolve(this.syncApi.getLastSeq())
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async applyRemoteDoc(doc: DbDoc): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          resolve(this.syncApi.applyRemoteDoc(doc))
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async applyRemoteChange(change: {
-    docId: string
-    rev?: string
-    parentRev?: string | null
-    deleted: boolean
-    timestamp?: number
-    doc?: DbDoc | null
-    resolution?: { retireOtherLeaves?: boolean }
-  }): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          resolve(this.syncApi.applyRemoteChange(change))
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async resolveConflict(docId: string, sourceRev: string): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          resolve(this.syncApi.resolveConflict(docId, sourceRev))
-        } catch (e) {
-          reject(e)
-        }
-      })
-    })
-  }
-
-  async applyRemoteRemove(docId: string): Promise<DbResult> {
-    return new Promise((resolve, reject) => {
-      setImmediate(() => {
-        try {
-          resolve(this.syncApi.applyRemoteRemove(docId))
-        } catch (e) {
-          reject(e)
+          resolve(operation())
+        } catch (error) {
+          reject(error)
         }
       })
     })

@@ -1,43 +1,41 @@
 import { app, ipcMain } from 'electron'
-import { createHash } from 'crypto'
-import { execSync } from 'child_process'
-import { hostname } from 'os'
+import { randomUUID } from 'crypto'
+import databaseAPI from '../shared/database'
+
+const INSTALLATION_ID_KEY = 'installation-id'
 
 /**
- * 设备与应用信息 API - 插件专用
- * 提供获取设备标识符和应用版本等信息的功能
+ * 向插件公开本地安装实例与应用版本信息。
  */
 export class PluginDeviceAPI {
-  private deviceId: string | null = null
+  private installationId: string | null = null
 
+  /**
+   * 注册设备信息相关的同步 IPC。
+   * @returns 无返回值
+   */
   public init(): void {
     this.setupIPC()
   }
 
   /**
-   * 公开方法：获取设备 ID（供其他模块使用）
+   * 注册插件可调用的本地安装 ID 与应用版本 IPC。
+   * @returns 无返回值
    */
-  public getDeviceIdPublic(): string {
-    return this.getDeviceId()
-  }
-
   private setupIPC(): void {
-    // 获取设备 ID（同步方法，供插件使用）
+    // 安装 ID 只从本地数据库读取或生成，不派生自硬件及系统账号。
     ipcMain.on('get-native-id', (event) => {
       try {
-        const id = this.getDeviceId()
-        event.returnValue = id
+        event.returnValue = this.getInstallationId()
       } catch (error) {
         console.error('[PluginDevice] get-native-id error:', error)
         event.returnValue = null
       }
     })
 
-    // 获取应用版本（同步方法，供插件使用）
     ipcMain.on('get-app-version', (event) => {
       try {
-        const version = app.getVersion()
-        event.returnValue = version
+        event.returnValue = app.getVersion()
       } catch (error) {
         console.error('[PluginDevice] get-app-version error:', error)
         event.returnValue = null
@@ -46,72 +44,28 @@ export class PluginDeviceAPI {
   }
 
   /**
-   * 获取设备 ID
-   * 返回 32 位的唯一标识符字符串
-   * 基于硬件 UUID 生成，确保卸载重装后 ID 一致
+   * 获取或创建仅在当前安装数据目录内持久化的随机实例 ID。
+   * @returns 稳定的 UUID 格式安装实例 ID
+   * @throws 当本地数据库无法读取或写入安装 ID 时抛出错误
    */
-  private getDeviceId(): string {
-    // 如果已经生成过，直接返回（内存缓存）
-    if (this.deviceId) {
-      return this.deviceId
+  private getInstallationId(): string {
+    if (this.installationId) return this.installationId
+
+    // 先复用本地已有值，保证应用重启后保持稳定。
+    const stored = databaseAPI.dbGet(INSTALLATION_ID_KEY)
+    if (typeof stored === 'string' && stored.trim()) {
+      this.installationId = stored
+      return stored
     }
 
-    try {
-      const hardwareUUID = this.getHardwareUUID()
-      // 使用 MD5 哈希生成 32 位十六进制字符串
-      this.deviceId = createHash('md5').update(hardwareUUID).digest('hex')
-      return this.deviceId
-    } catch (error) {
-      console.error('[PluginDevice] 获取设备 ID 失败:', error)
-      // 如果获取硬件信息失败，使用备用方案（基于用户名和主机名）
-      const fallbackString = `${process.env.USER || 'unknown'}-${hostname()}`
-      this.deviceId = createHash('md5').update(fallbackString).digest('hex')
-      return this.deviceId
+    // 首次使用时生成随机值，并在返回前完成持久化。
+    const installationId = randomUUID()
+    const result = databaseAPI.dbPut(INSTALLATION_ID_KEY, installationId)
+    if (!result?.ok) {
+      throw new Error('无法保存本地安装实例 ID')
     }
-  }
-
-  /**
-   * 获取硬件 UUID
-   * 跨平台支持：macOS、Windows、Linux
-   */
-  private getHardwareUUID(): string {
-    const platform = process.platform
-
-    try {
-      if (platform === 'darwin') {
-        // macOS: 使用 IOPlatformUUID
-        const output = execSync(
-          "ioreg -rd1 -c IOPlatformExpertDevice | grep IOPlatformUUID | awk '{print $3}' | tr -d '\"'",
-          { encoding: 'utf8' }
-        )
-        return output.trim()
-      } else if (platform === 'win32') {
-        // Windows: 使用 PowerShell 获取主板 UUID（wmic 已弃用）
-        const output = execSync(
-          'powershell -Command "(Get-CimInstance Win32_ComputerSystemProduct).UUID"',
-          { encoding: 'utf8' }
-        )
-        const uuid = output.trim()
-        if (uuid) {
-          return uuid
-        }
-        throw new Error('未找到 UUID')
-      } else if (platform === 'linux') {
-        // Linux: 尝试读取 /etc/machine-id 或 /var/lib/dbus/machine-id
-        try {
-          const output = execSync('cat /etc/machine-id', { encoding: 'utf8' })
-          return output.trim()
-        } catch {
-          const output = execSync('cat /var/lib/dbus/machine-id', { encoding: 'utf8' })
-          return output.trim()
-        }
-      }
-
-      throw new Error(`不支持的平台: ${platform}`)
-    } catch (error) {
-      console.error('[PluginDevice] 获取硬件 UUID 失败:', error)
-      throw error
-    }
+    this.installationId = installationId
+    return installationId
   }
 }
 

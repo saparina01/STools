@@ -36,51 +36,6 @@
 
     <!-- 工具按钮 -->
     <div class="toolbar">
-      <!-- 当前插件存在市场新版本时显示，展开层向左覆盖以保持右侧工具位置稳定。 -->
-      <div
-        v-if="hasPluginUpdate"
-        class="plugin-upgrade-slot"
-        :class="{
-          expanded: pluginUpdateStatus === 'upgrading' || pluginUpdateStatus === 'error'
-        }"
-      >
-        <div
-          class="plugin-upgrade-control"
-          :class="{
-            upgrading: pluginUpdateStatus === 'upgrading',
-            error: pluginUpdateStatus === 'error'
-          }"
-          :title="pluginUpgradeTitle"
-        >
-          <div class="plugin-upgrade-actions">
-            <button
-              type="button"
-              class="plugin-upgrade-action market-action"
-              :disabled="pluginUpdateStatus === 'upgrading'"
-              @click.stop="handleOpenPluginMarket"
-            >
-              进入市场查看
-            </button>
-            <button
-              type="button"
-              class="plugin-upgrade-action upgrade-now-action"
-              :disabled="pluginUpdateStatus === 'upgrading'"
-              @click.stop="handleUpgradePlugin"
-            >
-              {{ pluginUpgradeActionText }}
-            </button>
-          </div>
-          <button
-            type="button"
-            class="plugin-upgrade-trigger"
-            :aria-label="pluginUpgradeTitle"
-            @click.stop
-          >
-            <PluginUpgradeIcon />
-          </button>
-        </div>
-      </div>
-
       <!-- 插件设置按钮 -->
       <button class="toolbar-btn" title="插件设置" @click="showPluginSettings">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -167,8 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import PluginUpgradeIcon from '@renderer/assets/icons/plugin-upgrade.svg?component'
+import { onMounted, ref } from 'vue'
 import { normalizeConfigList } from '@shared/pluginSettings'
 import {
   resolveMainPushMenuState,
@@ -191,157 +145,6 @@ const acrylicDarkOpacity = ref(50) // 亚克力暗黑模式透明度（默认 50
 const aiRequestStatus = ref<'idle' | 'sending' | 'receiving'>('idle') // AI 请求状态
 const primaryColor = ref('green')
 const customColor = ref('#db2777')
-
-type PluginUpdateStatus = 'idle' | 'available' | 'upgrading' | 'error'
-
-interface PluginMarketDownloadProgress {
-  pluginName: string
-  taskId: string
-  status: 'downloading' | 'installing' | 'success' | 'error' | 'cancelled'
-  progress: number | null
-  receivedBytes?: number
-  totalBytes?: number
-  error?: string
-}
-
-const pluginUpdateStatus = ref<PluginUpdateStatus>('idle')
-const pluginUpdateName = ref('')
-const pluginCurrentVersion = ref('')
-const pluginLatestVersion = ref('')
-const pluginUpgradeProgress = ref<number | null>(null)
-const pluginUpgradeError = ref('')
-let pluginUpdateRequestSequence = 0
-let cleanupPluginUpdateProgressListener: (() => void) | null = null
-
-const hasPluginUpdate = computed(
-  () => pluginUpdateName.value === pluginId.value && pluginUpdateStatus.value !== 'idle'
-)
-const pluginUpgradeActionText = computed(() => {
-  if (pluginUpdateStatus.value === 'error') return '重试升级'
-  if (pluginUpdateStatus.value !== 'upgrading') return '立即升级'
-  if (pluginUpgradeProgress.value != null) {
-    return `升级 ${Math.round(pluginUpgradeProgress.value)}%`
-  }
-  return '正在安装'
-})
-const pluginUpgradeTitle = computed(() => {
-  if (pluginUpgradeError.value) return pluginUpgradeError.value
-  return `发现新版本 ${pluginLatestVersion.value}，当前版本 ${pluginCurrentVersion.value}`
-})
-
-/**
- * 清空独立窗口当前插件的更新展示状态。
- * @returns 无返回值
- */
-function resetPluginUpdateState(): void {
-  pluginUpdateStatus.value = 'idle'
-  pluginUpdateName.value = ''
-  pluginCurrentVersion.value = ''
-  pluginLatestVersion.value = ''
-  pluginUpgradeProgress.value = null
-  pluginUpgradeError.value = ''
-}
-
-/**
- * 检查独立窗口当前插件的市场版本，并丢弃插件切换后的过期响应。
- * @returns 检查完成后结束的 Promise
- */
-async function checkCurrentPluginUpdate(): Promise<void> {
-  const currentPluginName = pluginId.value
-  const currentPluginPath = pluginPath.value
-  const requestSequence = ++pluginUpdateRequestSequence
-  resetPluginUpdateState()
-  if (!currentPluginName || !currentPluginPath) return
-
-  try {
-    const result = await window.ztools.pluginUpdates.check(currentPluginName, currentPluginPath)
-    // 标题栏重载或插件上下文变化后，不允许旧响应覆盖当前状态。
-    if (
-      requestSequence !== pluginUpdateRequestSequence ||
-      pluginId.value !== currentPluginName ||
-      pluginPath.value !== currentPluginPath
-    ) {
-      return
-    }
-    if (!result.success || !result.updateAvailable || !result.latestVersion) return
-
-    pluginUpdateName.value = currentPluginName
-    pluginCurrentVersion.value = result.currentVersion || ''
-    pluginLatestVersion.value = result.latestVersion
-    pluginUpdateStatus.value = 'available'
-  } catch (error: unknown) {
-    // 更新检查失败不应阻断独立窗口插件的正常使用。
-    console.debug('[PluginUpdate] 独立窗口检查更新失败:', error)
-  }
-}
-
-/**
- * 从独立标题栏打开当前插件的市场详情页。
- * @returns 操作完成后结束的 Promise
- */
-async function handleOpenPluginMarket(): Promise<void> {
-  const currentPluginName = pluginUpdateName.value
-  if (!currentPluginName || pluginUpdateStatus.value === 'upgrading') return
-
-  try {
-    const result = await window.ztools.pluginUpdates.openMarket(currentPluginName)
-    if (!result.success) {
-      alert(`打开插件市场失败: ${result.error || '未知错误'}`)
-    }
-  } catch (error: unknown) {
-    alert(`打开插件市场失败: ${error instanceof Error ? error.message : '未知错误'}`)
-  }
-}
-
-/**
- * 从独立标题栏下载并安装当前插件的市场最新版本。
- * @returns 升级完成后结束的 Promise
- */
-async function handleUpgradePlugin(): Promise<void> {
-  const currentPluginName = pluginUpdateName.value
-  const currentPluginPath = pluginPath.value
-  if (!currentPluginName || !currentPluginPath || pluginUpdateStatus.value === 'upgrading') {
-    return
-  }
-
-  // 主进程会收起插件内容区，标题栏继续展示下载与安装进度。
-  pluginUpdateStatus.value = 'upgrading'
-  pluginUpgradeProgress.value = null
-  pluginUpgradeError.value = ''
-  try {
-    const result = await window.ztools.pluginUpdates.upgrade(currentPluginName, currentPluginPath)
-    if (!result.success) {
-      pluginUpdateStatus.value = 'error'
-      pluginUpgradeError.value = result.error || '升级失败'
-      alert(`插件升级失败: ${pluginUpgradeError.value}`)
-    } else {
-      resetPluginUpdateState()
-    }
-  } catch (error: unknown) {
-    pluginUpdateStatus.value = 'error'
-    pluginUpgradeError.value = error instanceof Error ? error.message : '升级失败'
-    alert(`插件升级失败: ${pluginUpgradeError.value}`)
-  }
-}
-
-/**
- * 将主进程发送的市场下载进度同步到独立标题栏升级控件。
- * @param payload 下载或安装阶段的进度数据
- * @returns 无返回值
- */
-function handlePluginUpgradeProgress(payload: PluginMarketDownloadProgress): void {
-  if (payload.pluginName !== pluginUpdateName.value) return
-
-  if (payload.status === 'downloading') {
-    pluginUpgradeProgress.value = payload.progress
-  } else if (payload.status === 'installing') {
-    pluginUpgradeProgress.value = null
-  } else if (payload.status === 'error' || payload.status === 'cancelled') {
-    pluginUpdateStatus.value = 'error'
-    pluginUpgradeError.value =
-      payload.error || (payload.status === 'cancelled' ? '升级已取消' : '升级失败')
-  }
-}
 
 /**
  * 获取指定主题色在当前明暗模式下对应的颜色值。
@@ -423,11 +226,6 @@ function applyAcrylicOverlay(): void {
 
 // 初始化
 onMounted(async () => {
-  // 仅监听当前独立标题栏发起的市场升级进度。
-  cleanupPluginUpdateProgressListener = window.ztools.pluginUpdates.onProgress(
-    handlePluginUpgradeProgress
-  )
-
   // 检测操作系统并添加类名
   const userAgent = navigator.userAgent.toLowerCase()
   const osPlatform = navigator.platform.toLowerCase()
@@ -524,9 +322,6 @@ onMounted(async () => {
     pluginPath.value = data.pluginPath || ''
     pluginLogo.value = data.pluginLogo
 
-    // 初始化信息到达后再检查版本，确保请求携带真实插件名和路径。
-    void checkCurrentPluginUpdate()
-
     // 设置窗口标题
     if (data.title) {
       document.title = data.title
@@ -594,13 +389,6 @@ onMounted(async () => {
       aiRequestStatus.value = status
     })
   }
-})
-
-onUnmounted(() => {
-  // 释放进度监听并让尚未返回的版本请求失效。
-  cleanupPluginUpdateProgressListener?.()
-  cleanupPluginUpdateProgressListener = null
-  pluginUpdateRequestSequence += 1
 })
 
 // 窗口控制

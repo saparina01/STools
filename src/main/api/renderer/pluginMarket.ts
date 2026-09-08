@@ -1,11 +1,5 @@
-import { httpGet } from '../../utils/httpRequest.js'
 import databaseAPI from '../shared/database'
-import {
-  PluginMarketAuthRequiredError,
-  PluginMarketAuthMode,
-  getPluginMarketApiBase,
-  requestPluginMarket
-} from './pluginMarketConfig'
+import { requestPluginMarket } from './pluginMarketConfig'
 
 // ━━━ Types ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -113,41 +107,6 @@ type MarketPluginsResponse = {
   latest?: PluginMarketPlugin[]
 }
 
-type PluginMarketCommentItem = {
-  id: number
-  pluginName: string
-  uid: string
-  nickname: string
-  avatarUrl?: string
-  parentId?: number | null
-  parent?: PluginMarketCommentParent | null
-  content: string
-  likeCount: number
-  liked: boolean
-  deleted?: boolean
-  createdAt: number
-  updatedAt: number
-}
-
-type PluginMarketCommentParent = {
-  id: number
-  uid: string
-  nickname: string
-  avatarUrl?: string
-  content: string
-  deleted: boolean
-  createdAt: number
-}
-
-type PluginMarketCommentPage = {
-  items: PluginMarketCommentItem[]
-  page: {
-    page: number
-    pageSize: number
-    total: number
-  }
-}
-
 /** fetchPluginMarket 的返回结果 */
 export type PluginMarketResult = {
   success: boolean
@@ -158,23 +117,6 @@ export type PluginMarketResult = {
   error?: string
 }
 
-export type PluginMarketLatestResult = {
-  available: boolean
-  reason?: 'not_found' | 'unsupported_platform'
-  plugin?: PluginMarketPlugin
-}
-
-type PluginMarketLatestResponse = {
-  available?: boolean
-  reason?: 'not_found' | 'unsupported_platform'
-  plugin?: PluginMarketPlugin
-}
-
-type PluginMarketLatestCacheEntry = {
-  expiresAt: number
-  result: PluginMarketLatestResult
-}
-
 // ━━━ Constants ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /** storefront 视图数据在 LMDB 中的缓存键 */
@@ -182,8 +124,6 @@ const PLUGIN_MARKET_STOREFRONT_CACHE_KEY = 'plugin-market-storefront'
 /** storefront 指纹在 LMDB 中的缓存键，用于判断缓存是否失效 */
 const PLUGIN_MARKET_STOREFRONT_FINGERPRINT_CACHE_KEY = 'plugin-market-storefront-fingerprint'
 const PLUGIN_MARKET_RECOMMEND_LIMIT = 12
-const PLUGIN_MARKET_LATEST_CACHE_MS = 5 * 60 * 1000
-const PLUGIN_MARKET_LATEST_UNAVAILABLE_CACHE_MS = 60 * 1000
 
 // ━━━ PluginMarketAPI ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -192,9 +132,6 @@ const PLUGIN_MARKET_LATEST_UNAVAILABLE_CACHE_MS = 60 * 1000
  * 负责从 ZTools 线上市场获取插件列表、缓存管理和首页 storefront 视图数据构建。
  */
 export class PluginMarketAPI {
-  private latestPluginCache = new Map<string, PluginMarketLatestCacheEntry>()
-  private latestPluginRequests = new Map<string, Promise<PluginMarketLatestResult>>()
-
   /**
    * 获取插件市场列表。
    * 缓存策略：
@@ -203,6 +140,10 @@ export class PluginMarketAPI {
    * @returns 插件列表和可选的 storefront 视图数据
    */
   public async fetchPluginMarket(): Promise<PluginMarketResult> {
+    /**
+     * 读取可用的本地市场缓存，缓存结构不完整时返回 null。
+     * @returns 本地缓存结果；没有有效缓存时返回 null。
+     */
     const getCachedResult = (): PluginMarketResult | null => {
       const cachedData = databaseAPI.dbGet('plugin-market-data')
       if (!Array.isArray(cachedData)) {
@@ -227,15 +168,14 @@ export class PluginMarketAPI {
     }
 
     try {
-      const marketApiBase = getPluginMarketApiBase()
       const timestamp = Date.now()
       const platform = process.platform
 
-      console.log('[Plugins] 从 ZTools 插件市场获取列表...', marketApiBase)
+      console.log('[Plugins] 从 ZTools 插件市场获取列表...')
 
       const [marketResponse, recommendations] = await Promise.all([
-        httpGet(
-          `${marketApiBase}/plugins?limit=${PLUGIN_MARKET_RECOMMEND_LIMIT}&platform=${encodeURIComponent(platform)}&t=${timestamp}`
+        requestPluginMarket(
+          `/plugins?limit=${PLUGIN_MARKET_RECOMMEND_LIMIT}&platform=${encodeURIComponent(platform)}&t=${timestamp}`
         ),
         this.fetchPluginMarketRecommendations(PLUGIN_MARKET_RECOMMEND_LIMIT).catch((error) => {
           console.warn('[Plugins] 获取推荐插件失败，将仅使用市场聚合数据:', error)
@@ -270,190 +210,21 @@ export class PluginMarketAPI {
   }
 
   /**
-   * 获取单个插件在当前平台可用的市场最新版本，并合并并发请求及短期缓存结果。
-   * @param pluginName 插件唯一名称
-   * @param platform 目标运行平台
-   * @returns 市场可用状态和最新插件元数据
-   * @throws 当插件名无效或市场请求失败时抛出错误
+   * 获取匿名推荐插件列表。
+   * @param limit 最大返回数量。
+   * @returns 名称有效的推荐插件列表。
    */
-  public async fetchLatestPlugin(
-    pluginName: string,
-    platform = process.platform
-  ): Promise<PluginMarketLatestResult> {
-    const normalizedName = pluginName.trim()
-    if (!normalizedName) {
-      throw new Error('插件名称不能为空')
-    }
-
-    const cacheKey = `${platform}:${normalizedName}`
-    const cached = this.latestPluginCache.get(cacheKey)
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.result
-    }
-
-    const pending = this.latestPluginRequests.get(cacheKey)
-    if (pending) return pending
-
-    // 同一插件的同时检查共享一次网络请求，避免频繁切换视图造成重复查询。
-    const request = this.loadLatestPlugin(normalizedName, platform).then((result) => {
-      const ttl = result.available
-        ? PLUGIN_MARKET_LATEST_CACHE_MS
-        : PLUGIN_MARKET_LATEST_UNAVAILABLE_CACHE_MS
-      this.latestPluginCache.set(cacheKey, { expiresAt: Date.now() + ttl, result })
-      return result
-    })
-    this.latestPluginRequests.set(cacheKey, request)
-    try {
-      return await request
-    } finally {
-      if (this.latestPluginRequests.get(cacheKey) === request) {
-        this.latestPluginRequests.delete(cacheKey)
-      }
-    }
-  }
-
-  /**
-   * 请求服务端的单插件最新版本接口并校验响应结构。
-   * @param pluginName 插件唯一名称
-   * @param platform 目标运行平台
-   * @returns 服务端返回的市场可用状态和插件元数据
-   * @throws 当响应声明可用却缺少有效插件信息时抛出错误
-   */
-  private async loadLatestPlugin(
-    pluginName: string,
-    platform: string
-  ): Promise<PluginMarketLatestResult> {
-    const query = new URLSearchParams({ name: pluginName })
-    if (platform) query.set('platform', platform)
-
-    const response = await requestPluginMarket(`/plugins/latest?${query.toString()}`)
-    const data = (
-      typeof response.data === 'string' ? JSON.parse(response.data) : response.data
-    ) as PluginMarketLatestResponse
-    if (!data?.available) {
-      return { available: false, reason: data?.reason }
-    }
-    if (!data.plugin?.name || !data.plugin.version) {
-      throw new Error('市场最新版本响应无效')
-    }
-    return { available: true, plugin: data.plugin }
-  }
-
   public async fetchPluginMarketRecommendations(
     limit = PLUGIN_MARKET_RECOMMEND_LIMIT
   ): Promise<PluginMarketPlugin[]> {
-    const marketApiBase = getPluginMarketApiBase()
     const timestamp = Date.now()
     const platform = process.platform
-    const response = await httpGet(
-      `${marketApiBase}/plugins/recommendations?limit=${limit}&platform=${encodeURIComponent(platform)}&t=${timestamp}`
+    const response = await requestPluginMarket(
+      `/plugins/recommendations?limit=${limit}&platform=${encodeURIComponent(platform)}&t=${timestamp}`
     )
     const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data
     const items = Array.isArray(data?.items) ? data.items : []
     return items.filter((plugin: PluginMarketPlugin) => !!plugin?.name)
-  }
-
-  /**
-   * 获取插件评论列表，并可让服务端返回包含指定评论的分页。
-   * @param pluginName 插件唯一名称。
-   * @param page 请求页码。
-   * @param pageSize 每页数量。
-   * @param anchorId 需要定位的评论标识；不定位时传 0。
-   * @returns 评论列表请求结果。
-   */
-  public async fetchComments(
-    pluginName: string,
-    page = 1,
-    pageSize = 20,
-    anchorId = 0
-  ): Promise<{
-    success: boolean
-    data?: PluginMarketCommentPage
-    error?: string
-    authRequired?: boolean
-  }> {
-    try {
-      const query = new URLSearchParams({
-        pluginName,
-        page: String(page),
-        pageSize: String(pageSize)
-      })
-      if (anchorId > 0) query.set('anchorId', String(anchorId))
-      const response = await requestPluginMarket(`/plugins/comments?${query.toString()}`)
-      return { success: true, data: this.parseCommentPage(response.data) }
-    } catch (error: unknown) {
-      return this.commentError(error, '评论加载失败')
-    }
-  }
-
-  public async createComment(input: {
-    pluginName: string
-    content: string
-    parentId?: number | null
-  }): Promise<{
-    success: boolean
-    data?: PluginMarketCommentItem
-    error?: string
-    authRequired?: boolean
-  }> {
-    try {
-      const response = await requestPluginMarket(
-        '/plugins/comments',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(input)
-        },
-        PluginMarketAuthMode.REQUIRED
-      )
-      return { success: true, data: this.parseCommentItem(response.data) }
-    } catch (error: unknown) {
-      return this.commentError(error, '评论发布失败')
-    }
-  }
-
-  public async toggleCommentLike(commentId: number): Promise<{
-    success: boolean
-    data?: { liked: boolean; likeCount: number }
-    error?: string
-    authRequired?: boolean
-  }> {
-    try {
-      const response = await requestPluginMarket(
-        `/plugins/comments/${commentId}/like`,
-        {
-          method: 'POST'
-        },
-        PluginMarketAuthMode.REQUIRED
-      )
-      const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data
-      return {
-        success: true,
-        data: {
-          liked: Boolean(data?.liked),
-          likeCount: Number(data?.likeCount || 0)
-        }
-      }
-    } catch (error: unknown) {
-      return this.commentError(error, '操作失败')
-    }
-  }
-
-  public async deleteComment(
-    commentId: number
-  ): Promise<{ success: boolean; error?: string; authRequired?: boolean }> {
-    try {
-      await requestPluginMarket(
-        `/plugins/comments/${commentId}`,
-        {
-          method: 'DELETE'
-        },
-        PluginMarketAuthMode.REQUIRED
-      )
-      return { success: true }
-    } catch (error: unknown) {
-      return this.commentError(error, '删除失败')
-    }
   }
 
   /**
@@ -469,64 +240,21 @@ export class PluginMarketAPI {
       .join('|')
   }
 
+  /**
+   * 将仓库响应规范化为市场聚合结构。
+   * @param value HTTP 客户端返回的 JSON 对象或字符串。
+   * @returns 可安全遍历的市场聚合数据。
+   */
   private parseMarketPluginsResponse(value: unknown): MarketPluginsResponse {
     const data = typeof value === 'string' ? JSON.parse(value) : value
     return data && typeof data === 'object' ? (data as MarketPluginsResponse) : {}
   }
 
-  private parseCommentPage(value: unknown): PluginMarketCommentPage {
-    const data = typeof value === 'string' ? JSON.parse(value) : value
-    const page = (data as PluginMarketCommentPage)?.page || { page: 1, pageSize: 20, total: 0 }
-    const items = Array.isArray((data as PluginMarketCommentPage)?.items)
-      ? (data as PluginMarketCommentPage).items.map((item) => this.parseCommentItem(item))
-      : []
-    return { items, page }
-  }
-
-  private parseCommentItem(value: unknown): PluginMarketCommentItem {
-    const item = (typeof value === 'string' ? JSON.parse(value) : value) as PluginMarketCommentItem
-    return {
-      id: Number(item?.id || 0),
-      pluginName: String(item?.pluginName || ''),
-      uid: String(item?.uid || ''),
-      nickname: String(item?.nickname || ''),
-      avatarUrl: String(item?.avatarUrl || ''),
-      parentId: item?.parentId == null ? null : Number(item.parentId),
-      parent: item?.parent ? this.parseCommentParent(item.parent) : null,
-      content: String(item?.content || ''),
-      likeCount: Number(item?.likeCount || 0),
-      liked: Boolean(item?.liked),
-      deleted: Boolean(item?.deleted),
-      createdAt: Number(item?.createdAt || 0),
-      updatedAt: Number(item?.updatedAt || 0)
-    }
-  }
-
-  private parseCommentParent(value: unknown): PluginMarketCommentParent {
-    const item = (
-      typeof value === 'string' ? JSON.parse(value) : value
-    ) as PluginMarketCommentParent
-    return {
-      id: Number(item?.id || 0),
-      uid: String(item?.uid || ''),
-      nickname: String(item?.nickname || ''),
-      avatarUrl: String(item?.avatarUrl || ''),
-      content: String(item?.content || ''),
-      deleted: Boolean(item?.deleted),
-      createdAt: Number(item?.createdAt || 0)
-    }
-  }
-
-  private commentError(
-    error: unknown,
-    fallback: string
-  ): { success: false; error: string; authRequired?: boolean } {
-    if (error instanceof PluginMarketAuthRequiredError) {
-      return { success: false, error: error.message, authRequired: true }
-    }
-    return { success: false, error: error instanceof Error ? error.message : fallback }
-  }
-
+  /**
+   * 从各分类中汇总并按插件名称去重。
+   * @param marketData 已解析的市场聚合数据。
+   * @returns 去重后的插件列表。
+   */
   private collectPlugins(marketData: MarketPluginsResponse): PluginMarketPlugin[] {
     const byName = new Map<string, PluginMarketPlugin>()
     const pushPlugin = (plugin?: PluginMarketPlugin): void => {
@@ -546,6 +274,9 @@ export class PluginMarketAPI {
   /**
    * 构建插件市场首页的 storefront 视图数据。
    * 将线上聚合 API 的 banners/categories/latest/recommendations 转换为渲染端可直接使用的首页结构。
+   * @param marketData 官方仓库返回的市场聚合数据。
+   * @param recommendations 官方仓库返回的推荐插件。
+   * @returns 可供设置插件直接渲染的市场首页结构。
    */
   private buildPluginMarketStorefront(
     marketData: MarketPluginsResponse,
@@ -632,6 +363,11 @@ export class PluginMarketAPI {
     }
   }
 
+  /**
+   * 为市场分类生成稳定的本地索引键。
+   * @param category 仓库返回的分类信息。
+   * @returns 优先使用数字 ID 的分类键。
+   */
   private categoryKey(category: MarketCategoryResponse): string {
     if (typeof category.id === 'number' && category.id > 0) {
       return String(category.id)

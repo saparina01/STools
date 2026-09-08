@@ -270,7 +270,7 @@ function formatDate(dateStr?: string): string {
         <div v-else class="empty-message">该插件暂无存储数据</div>
       </div>
 
-      <!-- 额外 Tab 内容（留言等） -->
+      <!-- 调用方扩展的附加 Tab 内容 -->
       <slot name="extra-tabs" />
     </div>
 

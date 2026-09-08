@@ -9,16 +9,9 @@
   "compilerOptions": {
     "composite": true,
     "paths": {
-      "@shared/*": [
-        "./src/shared/*"
-      ],
-      "@platform-updater": [
-        "./src/main/api/platformUpdater/windows.ts"
-      ]
+      "@shared/*": ["./src/shared/*"]
     },
-    "types": [
-      "electron-vite/node"
-    ],
+    "types": ["electron-vite/node"],
     "allowJs": true
   }
 }

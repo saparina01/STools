@@ -1,5 +1,5 @@
 import type { PluginManager } from '../../managers/pluginManager'
-import { ipcMain, type WebContents } from 'electron'
+import { ipcMain } from 'electron'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import { removePluginArtifact } from '../../utils/pluginStorage.js'
@@ -23,7 +23,6 @@ import {
   normalizeConfigList,
   removePluginNameFromSettingList
 } from '../../../shared/pluginSettings'
-import { comparePluginVersions } from '../../../shared/pluginVersion'
 
 // 插件目录
 const DISABLED_PLUGINS_KEY = 'disabled-plugins'
@@ -36,22 +35,6 @@ const PLUGIN_NAME_SETTING_KEYS = [
 
 export interface DeletePluginOptions {
   deleteData?: boolean
-}
-
-export interface PluginUpdateCheckResult {
-  success: boolean
-  updateAvailable: boolean
-  currentVersion?: string
-  latestVersion?: string
-  plugin?: {
-    name: string
-    version: string
-    title?: string
-    logo?: string
-    updatedAt?: number
-  }
-  reason?: string
-  error?: string
 }
 
 /**
@@ -173,35 +156,9 @@ export class PluginsAPI {
     ipcMain.handle('kill-plugin-and-return', (_event, pluginPath: string) =>
       this.killPluginAndReturn(pluginPath)
     )
-    // 插件运行界面只调用高层更新能力，版本查询和安装细节留在主进程。
-    ipcMain.handle('check-plugin-update', (_event, pluginName: string, pluginPath: string) =>
-      this.checkPluginUpdate(pluginName, pluginPath)
-    )
-    ipcMain.handle('upgrade-plugin-from-market', (event, pluginName: string, pluginPath: string) =>
-      this.upgradeCurrentPluginFromMarket(pluginName, pluginPath, event.sender)
-    )
-    ipcMain.handle('open-plugin-market-detail', (_event, pluginName: string) =>
-      windowManager.showPluginMarketDetail(pluginName)
-    )
     ipcMain.handle('fetch-plugin-market', () => this.market.fetchPluginMarket())
     ipcMain.handle('fetch-plugin-market-recommendations', (_event, limit?: number) =>
       this.market.fetchPluginMarketRecommendations(limit)
-    )
-    ipcMain.handle(
-      'fetch-plugin-market-comments',
-      (_event, pluginName: string, page?: number, pageSize?: number, anchorId?: number) =>
-        this.market.fetchComments(pluginName, page, pageSize, anchorId)
-    )
-    ipcMain.handle(
-      'create-plugin-market-comment',
-      (_event, input: { pluginName: string; content: string; parentId?: number | null }) =>
-        this.market.createComment(input)
-    )
-    ipcMain.handle('toggle-plugin-market-comment-like', (_event, commentId: number) =>
-      this.market.toggleCommentLike(commentId)
-    )
-    ipcMain.handle('delete-plugin-market-comment', (_event, commentId: number) =>
-      this.market.deleteComment(commentId)
     )
     ipcMain.handle('install-plugin-from-market', (event, plugin: any) =>
       this.installer.installPluginFromMarket(plugin, event.sender)
@@ -300,151 +257,6 @@ export class PluginsAPI {
     const allPlugins = await this.getAllPlugins()
     // 过滤掉所有内置插件（system、setting 等）
     return allPlugins.filter((plugin: any) => !isBundledInternalPlugin(plugin.name))
-  }
-
-  /**
-   * 检查已安装插件是否存在可用的市场新版本。
-   * @param pluginName 当前插件名称
-   * @param pluginPath 当前插件物理路径，用于精确匹配注册记录
-   * @returns 更新检查结果；网络或版本格式异常时返回失败原因
-   */
-  public async checkPluginUpdate(
-    pluginName: string,
-    pluginPath: string
-  ): Promise<PluginUpdateCheckResult> {
-    try {
-      const normalizedName = pluginName.trim()
-      const installedPlugin = this.readInstalledPlugins().find(
-        (plugin: any) => plugin.path === pluginPath || plugin.name === normalizedName
-      )
-      if (!installedPlugin) {
-        return { success: true, updateAvailable: false, reason: 'not_installed' }
-      }
-
-      // 开发插件和随包内置插件不应被同名市场版本覆盖。
-      if (installedPlugin.isDevelopment || isBundledInternalPlugin(installedPlugin.name)) {
-        return { success: true, updateAvailable: false, reason: 'not_eligible' }
-      }
-
-      const currentVersion = String(installedPlugin.version || '').trim()
-      if (!currentVersion) {
-        return { success: true, updateAvailable: false, reason: 'missing_local_version' }
-      }
-
-      const latest = await this.market.fetchLatestPlugin(installedPlugin.name)
-      if (!latest.available || !latest.plugin) {
-        return {
-          success: true,
-          updateAvailable: false,
-          currentVersion,
-          reason: latest.reason || 'not_found'
-        }
-      }
-
-      const comparison = comparePluginVersions(currentVersion, latest.plugin.version)
-      if (comparison === null) {
-        return {
-          success: false,
-          updateAvailable: false,
-          currentVersion,
-          latestVersion: latest.plugin.version,
-          error: '插件版本格式无效'
-        }
-      }
-
-      return {
-        success: true,
-        updateAvailable: comparison < 0,
-        currentVersion,
-        latestVersion: latest.plugin.version,
-        plugin: latest.plugin
-      }
-    } catch (error: unknown) {
-      console.warn('[Plugins] 检查插件市场更新失败:', error)
-      return {
-        success: false,
-        updateAvailable: false,
-        error: error instanceof Error ? error.message : '检查更新失败'
-      }
-    }
-  }
-
-  /**
-   * 收起当前插件视图，从市场完成升级，并使用原进入参数重新打开新版本。
-   * @param pluginName 当前插件名称
-   * @param pluginPath 当前插件物理路径
-   * @param webContents 发起升级并接收进度的主窗口或独立标题栏渲染进程
-   * @returns 安装和重新打开结果
-   */
-  public async upgradeCurrentPluginFromMarket(
-    pluginName: string,
-    pluginPath: string,
-    webContents?: WebContents
-  ): Promise<any> {
-    const normalizedName = pluginName.trim()
-    const installedPlugin = this.readInstalledPlugins().find(
-      (plugin: any) => plugin.name === normalizedName && plugin.path === pluginPath
-    )
-    if (!normalizedName || !installedPlugin || !this.pluginManager) {
-      return { success: false, error: '当前插件状态已变化，请重新进入插件后再升级' }
-    }
-
-    // 高度归零前保存当前指令、参数和原始高度，供安装后恢复。
-    const relaunchContext = this.pluginManager.collapseCurrentPluginForUpgrade(
-      normalizedName,
-      pluginPath,
-      webContents
-    )
-    if (!relaunchContext) {
-      return { success: false, error: '只能升级当前主窗口或独立窗口中正在显示的插件' }
-    }
-
-    let installResult: any
-    try {
-      installResult = await this.installer.installPluginFromMarket(
-        { name: normalizedName },
-        webContents
-      )
-    } catch (error: unknown) {
-      installResult = {
-        success: false,
-        error: error instanceof Error ? error.message : '升级失败'
-      }
-    }
-
-    // 成功时使用新注册路径；失败时使用仍有效的当前注册路径恢复旧版本。
-    const registeredPlugin = this.readInstalledPlugins().find(
-      (plugin: any) => plugin.name === normalizedName
-    )
-    const targetPath =
-      (installResult.success ? installResult.plugin?.path : undefined) ||
-      registeredPlugin?.path ||
-      relaunchContext.pluginPath
-    if (!targetPath) {
-      return {
-        ...installResult,
-        success: false,
-        error: installResult.error || '升级后未找到可运行的插件'
-      }
-    }
-
-    const reopenResult = await this.pluginManager.reopenPluginAfterUpgrade(
-      relaunchContext,
-      targetPath,
-      installResult.success
-    )
-    if (!reopenResult.success) {
-      return {
-        ...installResult,
-        success: false,
-        upgraded: installResult.success,
-        error: installResult.success
-          ? `插件已升级，但重新打开失败: ${reopenResult.error || '未知错误'}`
-          : `${installResult.error || '升级失败'}；恢复插件失败: ${reopenResult.error || '未知错误'}`
-      }
-    }
-
-    return installResult
   }
 
   /**

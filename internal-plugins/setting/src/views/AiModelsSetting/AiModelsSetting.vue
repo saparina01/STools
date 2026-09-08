@@ -7,7 +7,7 @@ import { useZtoolsSubInput } from '@/composables'
 import type { AiProvider, AiProviderInput, AiProviderStore } from '@shared/aiProviderShared'
 
 const { success, error, confirm } = useToast()
-const store = ref<AiProviderStore>({ version: 2, providers: [] })
+const store = ref<AiProviderStore>({ version: 3, providers: [] })
 const loading = ref(true)
 const isWorking = ref(false)
 const showEditor = ref(false)
@@ -23,6 +23,10 @@ const filteredProviders = computed(() =>
       weight: 4
     }
   ])
+)
+
+const hasPlaintextCredential = computed(() =>
+  store.value.providers.some((provider) => provider.credentialStorage === 'plaintext')
 )
 
 /**
@@ -80,8 +84,12 @@ function closeEditor(): void {
  * @returns 操作完成后结束的 Promise
  */
 async function handleSave(provider: AiProviderInput): Promise<void> {
-  if (!provider.name.trim() || !provider.apiUrl.trim() || !provider.apiKey.trim()) {
-    error('请填写供应商名称、API 地址和密钥')
+  if (!provider.name.trim() || !provider.apiUrl.trim()) {
+    error('请填写供应商名称和 API 地址')
+    return
+  }
+  if (!provider.id && !provider.apiKey?.trim()) {
+    error('新建供应商时必须填写 API 密钥')
     return
   }
   if (provider.selectedModels.length === 0) {
@@ -166,16 +174,6 @@ async function handleToggleProvider(provider: AiProvider, enabled: boolean): Pro
   }
 }
 
-/**
- * 将 API 密钥转换为适合列表展示的掩码。
- * @param apiKey 完整 API 密钥
- * @returns 掩码后的密钥
- */
-function maskApiKey(apiKey: string): string {
-  if (apiKey.length <= 8) return '********'
-  return `${apiKey.slice(0, 4)}****${apiKey.slice(-4)}`
-}
-
 onMounted(loadProviders)
 </script>
 
@@ -194,6 +192,10 @@ onMounted(loadProviders)
             <span>个模型</span>
           </div>
           <button class="btn btn-solid" @click="showAddEditor">添加供应商</button>
+        </div>
+
+        <div v-if="hasPlaintextCredential" class="credential-warning" role="alert">
+          当前系统无法使用安全凭据存储，至少一个 AI 密钥正以明文保存在本地数据库中。
         </div>
 
         <div class="provider-list">
@@ -247,7 +249,11 @@ onMounted(loadProviders)
 
             <div class="provider-meta">
               <span>{{ provider.selectedModels.length }} 个模型</span>
-              <span>{{ maskApiKey(provider.apiKey) }}</span>
+              <span v-if="provider.credentialStorage === 'safeStorage'">密钥已由系统加密保存</span>
+              <span v-else-if="provider.credentialStorage === 'plaintext'" class="unsafe-key">
+                密钥为明文保存
+              </span>
+              <span v-else>未保存密钥</span>
             </div>
 
             <div class="model-tags">
@@ -326,6 +332,17 @@ onMounted(loadProviders)
   height: 12px;
   margin: 0 5px;
   background: var(--divider-color);
+}
+
+.credential-warning {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning-color, #d97706), transparent 45%);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--warning-color, #d97706), transparent 90%);
+  color: var(--text-color);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .provider-list {
@@ -432,6 +449,11 @@ onMounted(loadProviders)
   margin: 13px 0 8px;
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+.unsafe-key {
+  color: var(--warning-color, #d97706);
+  font-weight: 600;
 }
 
 .model-tags {

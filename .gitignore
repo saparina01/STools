@@ -3,6 +3,7 @@ dist
 out
 playwright-report
 test-results
+/tests/
 .DS_Store
 .eslintcache
 *.log*

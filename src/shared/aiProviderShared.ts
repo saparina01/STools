@@ -1,16 +1,8 @@
 /** AI 供应商配置的当前存储版本。 */
-export const AI_PROVIDER_STORE_VERSION = 2 as const
+export const AI_PROVIDER_STORE_VERSION = 3 as const
 
-/** 旧版按单个模型保存的配置。 */
-export interface LegacyAiModel {
-  id: string
-  label: string
-  apiUrl: string
-  apiKey: string
-  description?: string
-  icon?: string
-  cost?: number
-}
+/** AI 密钥在本机使用的持久化保护方式。 */
+export type AiCredentialStorage = 'safeStorage' | 'plaintext'
 
 /** 供应商中已选中的单个远端模型。 */
 export interface AiProviderModel {
@@ -25,12 +17,13 @@ export interface AiProviderModel {
   cost?: number
 }
 
-/** 单个 AI 供应商及其已选模型。 */
+/** 不含明文密钥的单个 AI 供应商配置。 */
 export interface AiProvider {
   id: string
   name: string
   apiUrl: string
-  apiKey: string
+  hasApiKey: boolean
+  credentialStorage: AiCredentialStorage | null
   /** 是否允许插件发现和调用该供应商的模型。 */
   enabled: boolean
   selectedModels: AiProviderModel[]
@@ -55,7 +48,8 @@ export interface AiProviderInput {
   id?: string
   name: string
   apiUrl: string
-  apiKey: string
+  /** 新建时必填；编辑时留空表示保留已保存的密钥。 */
+  apiKey?: string
   selectedModels: AiProviderModelInput[]
 }
 
@@ -87,15 +81,40 @@ export interface AiProviderMutationResult {
 }
 
 /**
- * 判断未知数据是否为新版 AI 供应商文档。
+ * 判断未知数据是否为当前 AI 供应商文档。
  * @param value 待判断的持久化数据
- * @returns 是否为版本 2 的供应商文档
+ * @returns 是否为版本 3 且不包含明文密钥的供应商文档
  */
 export function isAiProviderStore(value: unknown): value is AiProviderStore {
   if (!value || typeof value !== 'object') return false
 
   const store = value as Partial<AiProviderStore>
-  return store.version === AI_PROVIDER_STORE_VERSION && Array.isArray(store.providers)
+  return (
+    store.version === AI_PROVIDER_STORE_VERSION &&
+    Array.isArray(store.providers) &&
+    store.providers.every(
+      (provider) =>
+        !!provider &&
+        typeof provider === 'object' &&
+        !Object.prototype.hasOwnProperty.call(provider, 'apiKey') &&
+        typeof provider.id === 'string' &&
+        typeof provider.name === 'string' &&
+        typeof provider.apiUrl === 'string' &&
+        typeof provider.hasApiKey === 'boolean' &&
+        (provider.credentialStorage === null ||
+          provider.credentialStorage === 'safeStorage' ||
+          provider.credentialStorage === 'plaintext') &&
+        typeof provider.enabled === 'boolean' &&
+        Array.isArray(provider.selectedModels) &&
+        provider.selectedModels.every(
+          (model) =>
+            !!model &&
+            typeof model === 'object' &&
+            typeof model.ref === 'string' &&
+            typeof model.modelId === 'string'
+        )
+    )
+  )
 }
 
 /**

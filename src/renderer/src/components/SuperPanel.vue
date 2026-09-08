@@ -2,16 +2,11 @@
   <div class="super-panel" @keydown="handleKeydown">
     <!-- 宫格模式：无剪贴板数据，显示固定指令 -->
     <template v-if="mode === 'pinned'">
-      <!-- 头部：头像 + 超级面板标题 -->
+      <!-- 头部：标题与面板操作 -->
       <div class="search-header pinned-header">
-        <img
-          :src="avatar"
-          class="header-avatar clickable"
-          draggable="false"
-          title="显示主搜索窗口"
-          @click="showMainWindow"
-        />
-        <span class="header-text">超级面板</span>
+        <button class="header-text header-home" type="button" @click="showMainWindow">
+          超级面板
+        </button>
         <div class="header-spacer" />
         <div class="header-actions">
           <div
@@ -414,7 +409,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import Draggable from 'vuedraggable'
-import defaultAvatar from '../assets/image/default.png'
 
 interface CommandItem {
   name: string
@@ -506,8 +500,6 @@ const currentClipboardContent = ref<ClipboardContent | null>(null)
 // 翻译结果
 const translationText = ref('')
 const pendingTranslation = ref<{ text: string; sourceText?: string } | null>(null)
-// 头像（默认使用内置头像）
-const avatar = ref(defaultAvatar)
 const acrylicLightOpacity = ref(78)
 const acrylicDarkOpacity = ref(50)
 const primaryColor = ref('green')
@@ -856,7 +848,10 @@ function showPinned(): void {
   window.ztools.superPanelShowPinned()
 }
 
-// 点击头像：隐藏超级面板，显示主搜索窗口
+/**
+ * 从超级面板标题入口返回主搜索窗口。
+ * @returns 无返回值。
+ */
 function showMainWindow(): void {
   window.ztools.superPanelShowMainWindow()
 }
@@ -1387,13 +1382,10 @@ onMounted(() => {
     }
   })
 
-  // 加载设置（头像、亚克力透明度、主题色）
+  // 加载面板外观设置。
   window.ztools
     .dbGet('settings-general')
     .then((settings) => {
-      if (settings?.avatar) {
-        avatar.value = settings.avatar
-      }
       if (settings) {
         acrylicLightOpacity.value = settings.acrylicLightOpacity ?? 78
         acrylicDarkOpacity.value = settings.acrylicDarkOpacity ?? 50
@@ -1455,12 +1447,6 @@ onMounted(() => {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     applyPrimaryColor()
     applyAcrylicOverlay()
-  })
-
-  // 监听头像更新事件
-  window.ztools.onUpdateAvatar((newAvatar: string) => {
-    console.log('[SuperPanel] 收到头像更新:', newAvatar)
-    avatar.value = newAvatar || defaultAvatar
   })
 
   // 监听翻译结果
@@ -1635,37 +1621,6 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
-.header-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.clickable {
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.clickable:hover {
-  opacity: 0.7;
-}
-
-.header-avatar-placeholder {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: var(--primary-gradient);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-on-primary);
-  font-size: 13px;
-  font-weight: bold;
-  flex-shrink: 0;
-}
-
 .header-text {
   font-size: 13px;
   font-weight: 500;
@@ -1673,6 +1628,17 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.header-home {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.header-home:hover {
+  color: var(--text-primary);
 }
 
 /* ========== 宫格模式 ========== */

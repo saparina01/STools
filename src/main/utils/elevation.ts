@@ -26,7 +26,7 @@ export async function isRunningAsAdmin(): Promise<boolean> {
  *
  * @param command 要执行的命令路径
  * @param args 命令参数
- * @param wait 是否等待进程完成（默认 false，适用于 updater 等需要在主应用退出后运行的程序）
+ * @param wait 是否等待进程完成（默认 false，适用于需要独立运行的辅助程序）
  * @throws 如果执行失败则抛出错误
  */
 export async function execWithElevation(

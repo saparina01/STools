@@ -4,28 +4,8 @@
 export interface DbDoc {
   _id: string
   _rev?: string
-  _lastModified?: number // 最后修改时间戳（毫秒），用于冲突解决
 
   [key: string]: any
-}
-
-export interface SyncMeta {
-  _rev: string
-  _winningRev?: string
-  _lastModified?: number
-  _deleted?: boolean
-  _hasConflicts?: boolean
-  _conflictCount?: number
-}
-
-export interface RevisionRecord {
-  docId: string
-  rev: string
-  parentRev?: string | null
-  deleted: boolean
-  timestamp: number
-  doc: DbDoc | null
-  isLeaf?: boolean
 }
 
 /**
@@ -66,19 +46,4 @@ export interface LmdbDatabase {
   putSync(key: string, value: any): void
   removeSync(key: string): boolean
   getRange(options: { start?: string; end?: string }): Iterable<{ key: string; value: any }>
-}
-
-/**
- * 变更日志条目
- */
-export interface ChangeEntry {
-  seq: number
-  docId: string
-  rev: string
-  parentRev?: string | null
-  deleted: boolean
-  timestamp: number
-  winnerRev?: string
-  isWinner?: boolean
-  resolution?: { retireOtherLeaves?: boolean }
 }

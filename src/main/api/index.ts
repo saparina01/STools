@@ -5,16 +5,12 @@ import type { PluginManager } from '../managers/pluginManager'
 import clipboardAPI from './shared/clipboard'
 import databaseAPI from './shared/database'
 
-import updaterAPI from './updater'
-
 // 主程序渲染进程专用API
 import aiModelsAPI from './renderer/aiModels'
 import appsAPI from './renderer/commands'
 import localShortcutsAPI from './renderer/localShortcuts'
 import pluginsAPI from './renderer/plugins'
 import settingsAPI from './renderer/settings'
-import storageAPI from './renderer/storage'
-import syncAPI from './renderer/sync'
 import systemAPI from './renderer/system'
 import { systemSettingsAPI } from './renderer/systemSettings'
 import windowAPI from './renderer/window'
@@ -39,7 +35,6 @@ import pluginShellAPI from './plugin/shell'
 import pluginToastAPI from './plugin/toast'
 import pluginToolsAPI from './plugin/tools'
 import pluginUIAPI from './plugin/ui'
-import pluginUserAPI from './plugin/user'
 import pluginWindowAPI from './plugin/window'
 import { setupImageAnalysisAPI } from './shared/imageAnalysis'
 import {
@@ -56,7 +51,6 @@ import pluginFFmpegAPI from './plugin/ffmpeg'
 import httpServer from '../core/httpServer'
 import mcpServer from '../core/mcpServer'
 import providerManager from '../core/provider/providerManager'
-import { runStartupDataMigrations } from '../core/startupDataMigrations'
 import superPanelManager from '../core/superPanelManager'
 import translationManager from '../core/translationManager'
 
@@ -99,8 +93,6 @@ class APIManager {
 
     // 初始化共享API
     databaseAPI.init(pluginManager)
-    // 启动时统一迁移mac图标历史遗留数据
-    runStartupDataMigrations()
     clipboardAPI.init()
     setupImageAnalysisAPI()
 
@@ -112,10 +104,8 @@ class APIManager {
     pluginsAPI.setCommandsCacheInvalidator(() => appsAPI.invalidateCommandsCache(false))
     windowAPI.init(mainWindow)
     settingsAPI.init(mainWindow, pluginManager)
-    storageAPI.init()
     systemAPI.init(mainWindow)
     systemSettingsAPI.init()
-    syncAPI.init(mainWindow, pluginManager)
     localShortcutsAPI.init(mainWindow)
     localShortcutsAPI.setCommandsCacheInvalidator(() => appsAPI.invalidateCommandsCache(false))
 
@@ -131,7 +121,6 @@ class APIManager {
     pluginAiAPI.init(mainWindow, pluginManager)
     pluginLifecycleAPI.init(mainWindow, pluginManager)
     pluginUIAPI.init(mainWindow, pluginManager)
-    pluginUserAPI.init(pluginManager)
     // 注入主题信息变更钩子：当主题色/材质变更时通知所有插件视图
     windowManager.setOnThemeInfoChanged(() => {
       pluginUIAPI.broadcastThemeInfoToAllPlugins()
@@ -157,9 +146,6 @@ class APIManager {
 
     // 初始化内置插件专用API
     internalPluginAPI.init(mainWindow, pluginManager)
-
-    // 初始化软件更新API
-    updaterAPI.init(mainWindow)
 
     // 初始化 HTTP 服务
     httpServer.init().catch((error) => {

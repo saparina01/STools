@@ -697,6 +697,8 @@ export class DatabaseAPI {
 
   /**
    * 清空指定插件的所有数据（供内部调用）
+   * @param pluginName 待清理插件的运行时名称。
+   * @returns 清理结果以及成功删除的文档数量。
    */
   private async _clearPluginData(
     pluginName: string
@@ -715,15 +717,15 @@ export class DatabaseAPI {
 
       let deletedCount = 0
 
-      // 1. 删除主数据库文档。清空插件数据是用户明确操作，删除 revision 需要收敛其他 leaf。
+      // 1. 删除主数据库文档及其本地 revision 元数据。
       for (const doc of allDocs) {
-        const result = lmdbInstance.removeAndResolve(doc._id)
+        const result = lmdbInstance.remove(doc._id)
         if (result.ok) {
           deletedCount++
         }
       }
 
-      // 2. 物理清理本地附件 body；文档 tombstone 已承担同步删除语义。
+      // 2. 物理清理本地附件内容和元数据。
       const attachmentDb = lmdbInstance.getAttachmentDb()
       const attachmentPrefix = `attachment:${prefix}`
       const attachmentDocIds: string[] = []

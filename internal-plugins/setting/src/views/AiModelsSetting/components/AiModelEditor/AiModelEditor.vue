@@ -57,7 +57,7 @@ function resetEditor(provider: AiProvider | null): void {
   formData.value = {
     name: provider?.name || '',
     apiUrl: provider?.apiUrl || '',
-    apiKey: provider?.apiKey || ''
+    apiKey: ''
   }
   fetchedModels.value = []
   selectedModelIds.value = new Set(provider?.selectedModels.map((model) => model.modelId) || [])
@@ -77,8 +77,12 @@ watch(() => props.editingProvider, resetEditor, { immediate: true })
  * @returns 操作完成后结束的 Promise
  */
 async function fetchModels(): Promise<void> {
-  if (!formData.value.apiUrl.trim() || !formData.value.apiKey.trim()) {
-    fetchError.value = '请先填写 API 地址和密钥'
+  if (!formData.value.apiUrl.trim()) {
+    fetchError.value = '请先填写 API 地址'
+    return
+  }
+  if (!formData.value.apiKey.trim() && !props.editingProvider?.hasApiKey) {
+    fetchError.value = '请先填写 API 密钥'
     return
   }
 
@@ -87,7 +91,8 @@ async function fetchModels(): Promise<void> {
   try {
     const result = await window.ztools.internal.aiProviders.fetchModels(
       formData.value.apiUrl,
-      formData.value.apiKey
+      formData.value.apiKey || undefined,
+      props.editingProvider?.id
     )
     if (!result.success || !result.data) {
       fetchError.value = result.error || '获取模型列表失败'
@@ -202,13 +207,13 @@ function handleSave(): void {
           </div>
 
           <div class="form-group">
-            <label class="form-label">API 密钥 *</label>
+            <label class="form-label">API 密钥 {{ isEditing ? '' : '*' }}</label>
             <div class="input-wrapper">
               <input
                 v-model="formData.apiKey"
                 :type="showPassword ? 'text' : 'password'"
                 class="input input-with-icon"
-                placeholder="输入 API 密钥"
+                :placeholder="isEditing ? '留空则保留已保存密钥' : '输入 API 密钥'"
               />
               <button
                 type="button"

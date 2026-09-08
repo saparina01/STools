@@ -5,10 +5,9 @@ import { pathToFileURL } from 'url'
 import clipboardManager from '../../managers/clipboardManager'
 import appleScriptHelper from '../../utils/appleScriptHelper'
 import { isWindows11, openDialog } from '../../utils/windowUtils'
-import { getAvatarPath } from '../../core/appData/appDataPaths'
+import { getAssetsPath } from '../../core/appData/appDataPaths'
 
-// 头像目录
-const AVATAR_DIR = getAvatarPath()
+const MANAGED_ASSETS_DIR = getAssetsPath()
 const SEARCH_WALLPAPER_MAX_WIDTH = 1920
 const SEARCH_WALLPAPER_JPEG_QUALITY = 85
 
@@ -46,7 +45,6 @@ export class SystemAPI {
     ipcMain.handle('show-context-menu', (event, menuItems) =>
       this.showContextMenu(event, menuItems)
     )
-    ipcMain.handle('select-avatar', () => this.selectAvatar())
     ipcMain.handle('select-image-file', () => this.selectImageFile())
 
     // App Info
@@ -221,35 +219,6 @@ export class SystemAPI {
     menu.popup({ window: this.mainWindow })
   }
 
-  public async selectAvatar(): Promise<any> {
-    try {
-      const result = await openDialog(
-        this.mainWindow!,
-        {
-          title: '选择头像图片',
-          filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
-          properties: ['openFile']
-        },
-        '未选择文件'
-      )
-      if (!result.success) {
-        return result
-      }
-      const originalPath = result.data!.filePaths[0]
-      const ext = path.extname(originalPath)
-      const fileName = `avatar${ext}`
-
-      await fs.mkdir(AVATAR_DIR, { recursive: true })
-      const avatarPath = path.join(AVATAR_DIR, fileName)
-      await fs.copyFile(originalPath, avatarPath)
-
-      return { success: true, path: pathToFileURL(avatarPath).href }
-    } catch (error: unknown) {
-      console.error('[System] 选择头像失败:', error)
-      return { success: false, error: error instanceof Error ? error.message : '未知错误' }
-    }
-  }
-
   public async selectImageFile(): Promise<any> {
     try {
       const result = await openDialog(
@@ -319,11 +288,11 @@ export class SystemAPI {
           : '.png'
         : sourceExtension
       const wallpaperPath = path.join(
-        AVATAR_DIR,
+        MANAGED_ASSETS_DIR,
         `search-wallpaper-${Date.now()}${managedExtension}`
       )
 
-      await fs.mkdir(AVATAR_DIR, { recursive: true })
+      await fs.mkdir(MANAGED_ASSETS_DIR, { recursive: true })
 
       let outputSize = sourceSize
       if (shouldCompress) {
@@ -370,15 +339,15 @@ export class SystemAPI {
    */
   private async cleanupManagedSearchWallpapers(keptFilePath: string): Promise<void> {
     try {
-      const entries = await fs.readdir(AVATAR_DIR, { withFileTypes: true })
+      const entries = await fs.readdir(MANAGED_ASSETS_DIR, { withFileTypes: true })
       const keptPath = path.resolve(keptFilePath)
 
-      // 删除范围严格限定为本功能生成的普通文件，避免影响头像和其他资源。
+      // 删除范围严格限定为本功能生成的普通文件，避免影响其他托管资源。
       await Promise.all(
         entries
           .filter((entry) => entry.isFile() && entry.name.startsWith('search-wallpaper-'))
           .map(async (entry) => {
-            const candidatePath = path.resolve(AVATAR_DIR, entry.name)
+            const candidatePath = path.resolve(MANAGED_ASSETS_DIR, entry.name)
             if (candidatePath !== keptPath) {
               await fs.unlink(candidatePath)
             }

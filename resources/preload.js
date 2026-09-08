@@ -295,7 +295,7 @@ window.ztools = {
   isMacOS: () => osType === 'Darwin',
   isWindows: () => osType === 'Windows_NT',
   isLinux: () => osType === 'Linux',
-  // 获取设备唯一标识符（32位字符串）
+  // 获取仅在当前本地数据目录持久化的随机安装实例 ID
   getNativeId: () => electron.ipcRenderer.sendSync('get-native-id'),
   // 获取应用版本号
   getAppVersion: () => electron.ipcRenderer.sendSync('get-app-version'),
@@ -303,10 +303,6 @@ window.ztools = {
   getWindowType: () => electron.ipcRenderer.sendSync('get-window-type'),
   // 是否深色主题
   isDarkColors: () => electron.ipcRenderer.sendSync('is-dark-colors'),
-  // 获取当前登录用户的公开资料
-  getUser: () => ipcSendSync('getUser'),
-  // 获取当前插件访问 ZTools 服务端的短期鉴权令牌
-  getUserTempToken: () => ipcInvoke('getUserTempToken'),
   // 获取当前主题信息（isDark, primaryColor, customColor, windowMaterial）
   getThemeInfo: () => ipcSendSync('getThemeInfo'),
   // 监听主题变更
@@ -955,30 +951,6 @@ window.ztools = {
       await electron.ipcRenderer.invoke('internal:fetch-plugin-market'),
     fetchPluginMarketRecommendations: async (limit) =>
       await electron.ipcRenderer.invoke('internal:fetch-plugin-market-recommendations', limit),
-    fetchPluginMarketComments: async (pluginName, page, pageSize, anchorId) =>
-      await electron.ipcRenderer.invoke(
-        'internal:fetch-plugin-market-comments',
-        pluginName,
-        page,
-        pageSize,
-        anchorId
-      ),
-    createPluginMarketComment: async (input) =>
-      await electron.ipcRenderer.invoke('internal:create-plugin-market-comment', input),
-    togglePluginMarketCommentLike: async (commentId) =>
-      await electron.ipcRenderer.invoke('internal:toggle-plugin-market-comment-like', commentId),
-    deletePluginMarketComment: async (commentId) =>
-      await electron.ipcRenderer.invoke('internal:delete-plugin-market-comment', commentId),
-    notificationSummary: async () =>
-      await electron.ipcRenderer.invoke('internal:notification-summary'),
-    notificationList: async (beforeId, limit, unreadOnly) =>
-      await electron.ipcRenderer.invoke('internal:notification-list', beforeId, limit, unreadOnly),
-    notificationMarkRead: async (id) =>
-      await electron.ipcRenderer.invoke('internal:notification-mark-read', id),
-    notificationMarkAllRead: async () =>
-      await electron.ipcRenderer.invoke('internal:notification-mark-all-read'),
-    notificationArchive: async (id) =>
-      await electron.ipcRenderer.invoke('internal:notification-archive', id),
     installPluginFromMarket: async (plugin) =>
       await electron.ipcRenderer.invoke('internal:install-plugin-from-market', plugin),
     cancelPluginMarketDownload: async (pluginNameOrTaskId) =>
@@ -1054,7 +1026,6 @@ window.ztools = {
       await electron.ipcRenderer.invoke('internal:set-window-material', material),
     getWindowMaterial: async () =>
       await electron.ipcRenderer.invoke('internal:get-window-material'),
-    selectAvatar: async () => await electron.ipcRenderer.invoke('internal:select-avatar'),
     setTheme: async (theme) => await electron.ipcRenderer.invoke('internal:set-theme', theme),
     setTrayIconVisible: async (visible) =>
       await electron.ipcRenderer.invoke('internal:set-tray-icon-visible', visible),
@@ -1077,9 +1048,6 @@ window.ztools = {
     // 通知主渲染进程更新搜索框提示文字
     updatePlaceholder: async (placeholder) =>
       await electron.ipcRenderer.invoke('internal:update-placeholder', placeholder),
-    // 通知主渲染进程更新头像
-    updateAvatar: async (avatar) =>
-      await electron.ipcRenderer.invoke('internal:update-avatar', avatar),
     // 通知主渲染进程更新自动粘贴配置
     updateAutoPaste: async (autoPaste) =>
       await electron.ipcRenderer.invoke('internal:update-auto-paste', autoPaste),
@@ -1156,94 +1124,6 @@ window.ztools = {
       }
     },
 
-    // ==================== 应用更新 API ====================
-    updaterCheckUpdate: async () =>
-      await electron.ipcRenderer.invoke('internal:updater-check-update'),
-    updaterStartUpdate: async () =>
-      await electron.ipcRenderer.invoke('internal:updater-start-update'),
-    updaterSetAutoCheck: async (enabled) =>
-      await electron.ipcRenderer.invoke('internal:updater-set-auto-check', enabled),
-
-    // ==================== 数据同步 API ====================
-    syncTestConnection: async (config) =>
-      await electron.ipcRenderer.invoke('sync:test-connection', config),
-    syncGetCaptchaConfig: async (params) =>
-      await electron.ipcRenderer.invoke('sync:get-captcha-config', params),
-    accountGetSession: async () => await electron.ipcRenderer.invoke('account:get-session'),
-    accountLogin: async (params) => await electron.ipcRenderer.invoke('account:login', params),
-    accountSaveSession: async (params) =>
-      await electron.ipcRenderer.invoke('account:save-session', params),
-    accountLogout: async () => await electron.ipcRenderer.invoke('account:logout'),
-    /**
-     * 永久删除当前官方账号及其服务端数据。
-     * @returns {Promise<{success: boolean, error?: string}>} 删除账号和本地退出结果
-     */
-    accountDelete: async () => await electron.ipcRenderer.invoke('account:delete'),
-    syncLogin: async (params) => await electron.ipcRenderer.invoke('sync:login', params),
-    syncLoginPrivate: async (params) =>
-      await electron.ipcRenderer.invoke('sync:login-private', params),
-    /**
-     * 注销当前私有同步服务器会话。
-     * @returns {Promise<{success: boolean, error?: string}>} 主进程注销结果
-     */
-    syncLogoutPrivate: async () => await electron.ipcRenderer.invoke('sync:logout-private'),
-    syncSaveConfig: async (config) => await electron.ipcRenderer.invoke('sync:save-config', config),
-    syncGetConfig: async () => await electron.ipcRenderer.invoke('sync:get-config'),
-    syncGetState: async () => await electron.ipcRenderer.invoke('sync:get-state'),
-    syncGetStatus: async () => await electron.ipcRenderer.invoke('sync:get-status'),
-    syncGetDefaultImportStatus: async () =>
-      await electron.ipcRenderer.invoke('sync:get-default-import-status'),
-    syncImportDefaultData: async () =>
-      await electron.ipcRenderer.invoke('sync:import-default-data'),
-    syncSkipDefaultImport: async () =>
-      await electron.ipcRenderer.invoke('sync:skip-default-import'),
-    syncGetRetryStatus: async () => await electron.ipcRenderer.invoke('sync:get-retry-status'),
-    syncGetAccountStats: async () => await electron.ipcRenderer.invoke('sync:get-account-stats'),
-    syncGetAccountProfile: async () =>
-      await electron.ipcRenderer.invoke('sync:get-account-profile'),
-    syncUploadAccountAvatar: async (avatarPath) =>
-      await electron.ipcRenderer.invoke('sync:upload-account-avatar', avatarPath),
-    syncRetryNow: async () => await electron.ipcRenderer.invoke('sync:retry-now'),
-    syncPerformSync: async () => await electron.ipcRenderer.invoke('sync:perform-sync'),
-    syncStopAutoSync: async () => await electron.ipcRenderer.invoke('sync:stop-auto-sync'),
-    syncGetUnsyncedCount: async () => await electron.ipcRenderer.invoke('sync:get-unsynced-count'),
-    syncGetConflictCount: async () => await electron.ipcRenderer.invoke('sync:get-conflict-count'),
-    syncListConflicts: async () => await electron.ipcRenderer.invoke('sync:list-conflicts'),
-    syncGetConflictDetail: async (docId) =>
-      await electron.ipcRenderer.invoke('sync:get-conflict-detail', docId),
-    syncResolveConflict: async (docId, sourceRev) =>
-      await electron.ipcRenderer.invoke('sync:resolve-conflict', { docId, sourceRev }),
-    storageGetInitState: async () => await electron.ipcRenderer.invoke('storage:get-init-state'),
-    storageStartFresh: async () => await electron.ipcRenderer.invoke('storage:start-fresh'),
-    storageImportLegacy: async (options) =>
-      await electron.ipcRenderer.invoke('storage:import-legacy', options),
-    syncResetLocalSyncState: async () =>
-      await electron.ipcRenderer.invoke('sync:reset-local-sync-state'),
-    syncForcePushAll: async () => await electron.ipcRenderer.invoke('sync:force-push-all'),
-    // GitHub OAuth 登录（轮询方式）
-    syncGithubInitSession: async (params) =>
-      await electron.ipcRenderer.invoke('sync:github-init-session', params),
-    syncGithubOpenBrowser: async (params) =>
-      await electron.ipcRenderer.invoke('sync:github-open-browser', params),
-    syncGithubPollStatus: async (params) =>
-      await electron.ipcRenderer.invoke('sync:github-poll-status', params),
-    // 更新用户昵称
-    syncUpdateNickname: async (params) =>
-      await electron.ipcRenderer.invoke('sync:update-nickname', params),
-    onSyncStatusChanged: (callback) => {
-      const handler = (_event, payload) => {
-        if (typeof callback === 'function') callback(payload || {})
-      }
-      electron.ipcRenderer.on('sync:status-changed', handler)
-      return () => electron.ipcRenderer.removeListener('sync:status-changed', handler)
-    },
-    onSyncAccountStorageChanged: (callback) => {
-      const handler = (_event, payload) => {
-        if (typeof callback === 'function') callback(payload)
-      }
-      electron.ipcRenderer.on('sync:account-storage-changed', handler)
-      return () => electron.ipcRenderer.removeListener('sync:account-storage-changed', handler)
-    },
     onLocalShortcutsChanged: (callback) => {
       const handler = (_event) => {
         if (typeof callback === 'function') callback()
@@ -1351,11 +1231,17 @@ window.ztools = {
       /**
        * 拉取 OpenAI 兼容供应商的模型列表。
        * @param {string} apiUrl 供应商接口基础地址
-       * @param {string} apiKey 供应商 API 密钥
+       * @param {string | undefined} apiKey 本次输入的 API 密钥
+       * @param {string | undefined} providerId 编辑中的 Provider ID
        * @returns 远端模型查询结果
        */
-      fetchModels: async (apiUrl, apiKey) =>
-        await electron.ipcRenderer.invoke('internal:ai-providers-fetch-models', apiUrl, apiKey)
+      fetchModels: async (apiUrl, apiKey, providerId) =>
+        await electron.ipcRenderer.invoke(
+          'internal:ai-providers-fetch-models',
+          apiUrl,
+          apiKey,
+          providerId
+        )
     },
 
     // ==================== Provider（翻译 / OCR 等）管理 API ====================

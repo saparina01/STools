@@ -1,39 +1,29 @@
 import { app } from 'electron'
-import { storageManager } from '../storage/storageManager'
+import { ensureLocalLayout } from '../appData/appDataPaths'
+import LmdbDatabase from './index'
 
-/**
- * 3.0 共享数据库入口。
- *
- * 这里导出的是 StorageRouter：调用方继续使用 lmdbInstance，
- * 实际读写会按 key 路由到 device/account LMDB。
- */
-const initState = storageManager.init()
-const lmdbInstance = storageManager.getRouter()
-
-console.log('[LMDB] ZTools 3.0 storage initialized', {
-  firstRun: initState.firstRun,
-  legacyLmdbFound: initState.legacyLmdbFound,
-  device: initState.layout.deviceLmdbPath,
-  defaultAccount: initState.layout.defaultAccountLmdbPath
+// 启动时只打开一个固定的本地 LMDB 环境，不再解析账号或旧数据布局。
+const layout = ensureLocalLayout()
+const lmdbInstance = new LmdbDatabase({
+  path: layout.localLmdbPath,
+  maxDbs: 3
 })
 
-// 导出单例实例
+console.log('[LMDB] local storage initialized', { path: layout.localLmdbPath })
+
 export default lmdbInstance
-export { storageManager }
 
 /**
- * 清理函数：应用退出时调用
+ * 关闭单一本地 LMDB 环境。
+ * @returns 无返回值。
  */
 export function closeLmdb(): void {
   try {
-    storageManager.close()
-    console.log('[LMDB] ZTools storage closed successfully')
-  } catch (e) {
-    console.error('[LMDB] Error closing LMDB:', e)
+    lmdbInstance.close()
+    console.log('[LMDB] local storage closed successfully')
+  } catch (error) {
+    console.error('[LMDB] error closing local storage:', error)
   }
 }
 
-// 监听应用退出事件，自动关闭数据库
-app.on('will-quit', () => {
-  closeLmdb()
-})
+app.on('will-quit', closeLmdb)

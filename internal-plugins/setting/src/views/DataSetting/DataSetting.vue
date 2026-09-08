@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useToast, AdaptiveIcon, DetailPanel } from '@/components'
-import ProgressCircleButton from '@/components/common/ProgressCircleButton/ProgressCircleButton.vue'
 import { weightedSearch } from '@/utils'
 import { useZtoolsSubInput } from '@/composables'
-import { ACCOUNT_CHANGED_EVENT } from '@/composables/useZToolsAccount'
 
 const { success, error, confirm } = useToast()
 
@@ -26,24 +24,6 @@ interface InstalledPlugin {
   isDevelopment?: boolean
 }
 
-interface MarketPlugin {
-  name: string
-  title?: string
-  description?: string
-  logo?: string
-  version?: string
-  [key: string]: unknown
-}
-
-interface PluginDownloadState {
-  taskId?: string
-  status: 'downloading' | 'installing' | 'success' | 'error' | 'cancelled'
-  progress: number | null
-  receivedBytes?: number
-  totalBytes?: number
-  error?: string
-}
-
 interface DocItem {
   key: string
   type: 'document' | 'attachment'
@@ -54,19 +34,16 @@ type PageLevel = 'main' | 'docList' | 'docDetail'
 
 const pluginDataList = ref<PluginData[]>([])
 const installedPluginNames = ref<Set<string>>(new Set())
-const marketPluginMap = ref<Map<string, MarketPlugin>>(new Map())
-const installingPlugin = ref<string | null>(null)
-const downloadStates = ref<Record<string, PluginDownloadState | undefined>>({})
 const isLoaded = ref(false)
 
 // 获取插件显示名称（优先 title，回退到 name）
 function getDisplayName(data: Pick<PluginData, 'pluginName' | 'pluginTitle'> | null): string {
   if (!data) return ''
-  return data.pluginTitle || marketPluginMap.value.get(data.pluginName)?.title || data.pluginName
+  return data.pluginTitle || data.pluginName
 }
 
 function getPluginLogo(data: PluginData): string | null {
-  return data.logo || marketPluginMap.value.get(data.pluginName)?.logo || null
+  return data.logo || null
 }
 
 function isPluginInstalled(data: PluginData): boolean {
@@ -75,32 +52,6 @@ function isPluginInstalled(data: PluginData): boolean {
     data.isDevelopment ||
     installedPluginNames.value.has(data.pluginName)
   )
-}
-
-function canDownloadPlugin(data: PluginData): boolean {
-  return (
-    !data.isDevelopment &&
-    data.pluginName !== 'ZTOOLS' &&
-    !isPluginInstalled(data) &&
-    marketPluginMap.value.has(data.pluginName)
-  )
-}
-
-function getDownloadState(pluginName: string): PluginDownloadState | undefined {
-  return downloadStates.value[pluginName]
-}
-
-function setDownloadState(pluginName: string, state: PluginDownloadState): void {
-  downloadStates.value = {
-    ...downloadStates.value,
-    [pluginName]: state
-  }
-}
-
-function clearDownloadState(pluginName: string): void {
-  const nextStates = { ...downloadStates.value }
-  delete nextStates[pluginName]
-  downloadStates.value = nextStates
 }
 
 // 生成列表 key
@@ -125,8 +76,6 @@ const selectedDocKey = ref('')
 const currentDocContent = ref<any>(null)
 const currentDocType = ref<'document' | 'attachment'>('document')
 const docListAnimation = ref('slide') // 二级页面的动画名称，完全手动控制
-let removeAccountStorageListener: (() => void) | undefined
-let removeDownloadProgressListener: (() => void) | undefined
 let loadRequestId = 0
 
 // 二级页面的动画类
@@ -169,6 +118,11 @@ async function loadPluginData(): Promise<void> {
   }
 }
 
+/**
+ * 加载本机已安装插件的名称集合，用于标记孤立的插件数据。
+ * @param requestId 当前加载批次的标识，用于丢弃过期异步结果。
+ * @returns 加载完成后结束的 Promise。
+ */
 async function loadPluginMetadata(requestId = loadRequestId): Promise<void> {
   try {
     const installedPlugins = await window.ztools.internal
@@ -180,97 +134,9 @@ async function loadPluginMetadata(requestId = loadRequestId): Promise<void> {
         .filter((plugin) => plugin?.name && !plugin.isDevelopment)
         .map((plugin) => plugin.name)
     )
-
-    const marketResult = await window.ztools.internal.fetchPluginMarket().catch((err: unknown) => {
-      console.warn('加载插件市场失败:', err)
-      return null
-    })
-    if (requestId !== loadRequestId) return
-
-    const nextMarketMap = new Map<string, MarketPlugin>()
-    const marketPlugins = Array.isArray((marketResult as any)?.data)
-      ? (marketResult as any).data
-      : []
-    for (const plugin of marketPlugins as MarketPlugin[]) {
-      if (plugin?.name) {
-        nextMarketMap.set(plugin.name, plugin)
-      }
-    }
-    marketPluginMap.value = nextMarketMap
   } catch (err) {
     console.warn('加载插件元数据失败:', err)
   }
-}
-
-function handleDownloadProgress(payload: PluginDownloadState & { pluginName: string }): void {
-  setDownloadState(payload.pluginName, {
-    taskId: payload.taskId,
-    status: payload.status,
-    progress: payload.progress,
-    receivedBytes: payload.receivedBytes,
-    totalBytes: payload.totalBytes,
-    error: payload.error
-  })
-
-  if (
-    payload.status === 'success' ||
-    payload.status === 'error' ||
-    payload.status === 'cancelled'
-  ) {
-    window.setTimeout(() => clearDownloadState(payload.pluginName), 500)
-  }
-}
-
-async function downloadPlugin(pluginData: PluginData): Promise<void> {
-  const marketPlugin = marketPluginMap.value.get(pluginData.pluginName)
-  if (!marketPlugin || !canDownloadPlugin(pluginData)) return
-
-  const currentState = getDownloadState(pluginData.pluginName)
-  if (currentState?.status === 'downloading') {
-    const cancelResult = await window.ztools.internal.cancelPluginMarketDownload(
-      currentState.taskId || pluginData.pluginName
-    )
-    if (!cancelResult.success) {
-      error(`取消下载失败: ${cancelResult.error || '未知错误'}`)
-    }
-    return
-  }
-
-  if (installingPlugin.value) return
-
-  installingPlugin.value = pluginData.pluginName
-  setDownloadState(pluginData.pluginName, {
-    status: 'downloading',
-    progress: null
-  })
-
-  try {
-    const result = await window.ztools.internal.installPluginFromMarket(
-      JSON.parse(JSON.stringify(marketPlugin))
-    )
-    if (result.success) {
-      success(`${getDisplayName(pluginData)} 安装成功`)
-      installedPluginNames.value = new Set([...installedPluginNames.value, pluginData.pluginName])
-      await loadPluginData()
-    } else if (result.cancelled) {
-      clearDownloadState(pluginData.pluginName)
-    } else {
-      error(`安装失败: ${result.error || '未知错误'}`)
-    }
-  } catch (err) {
-    console.error('安装插件失败:', err)
-    error(`安装失败: ${err instanceof Error ? err.message : '未知错误'}`)
-  } finally {
-    installingPlugin.value = null
-    clearDownloadState(pluginData.pluginName)
-  }
-}
-
-async function handleAccountStorageChanged(): Promise<void> {
-  closeDocDetailModal()
-  closeDocListModal()
-  isLoaded.value = false
-  await loadPluginData()
 }
 
 // 查看插件文档
@@ -435,19 +301,10 @@ function handleKeydown(e: KeyboardEvent): void {
 onMounted(() => {
   loadPluginData()
   window.addEventListener('keydown', handleKeydown, true)
-  window.addEventListener(ACCOUNT_CHANGED_EVENT, handleAccountStorageChanged)
-  removeAccountStorageListener = window.ztools.internal.onSyncAccountStorageChanged?.(() => {
-    handleAccountStorageChanged()
-  })
-  removeDownloadProgressListener =
-    window.ztools.internal.onPluginMarketDownloadProgress?.(handleDownloadProgress)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeydown, true)
-  window.removeEventListener(ACCOUNT_CHANGED_EVENT, handleAccountStorageChanged)
-  removeAccountStorageListener?.()
-  removeDownloadProgressListener?.()
 })
 </script>
 
@@ -507,27 +364,6 @@ onUnmounted(() => {
               >
             </div>
 
-            <ProgressCircleButton
-              v-if="canDownloadPlugin(pluginData)"
-              class="download-plugin-btn"
-              title="从官方市场下载安装"
-              :active-title="
-                getDownloadState(pluginData.pluginName)?.status === 'installing'
-                  ? '安装中'
-                  : '取消下载'
-              "
-              :active="!!getDownloadState(pluginData.pluginName)"
-              :progress="getDownloadState(pluginData.pluginName)?.progress ?? null"
-              :disabled="
-                getDownloadState(pluginData.pluginName)?.status === 'installing' ||
-                (!!installingPlugin &&
-                  installingPlugin !== pluginData.pluginName &&
-                  getDownloadState(pluginData.pluginName)?.status !== 'downloading')
-              "
-              @click.stop="downloadPlugin(pluginData)"
-            >
-              <div class="i-z-download font-size-16px" />
-            </ProgressCircleButton>
             <button class="icon-btn" title="查看文档">
               <div class="i-z-search font-size-18px" />
             </button>

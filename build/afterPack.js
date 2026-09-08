@@ -33,44 +33,6 @@ async function copy(src, dest) {
 }
 
 /**
- * 为 Windows 和 macOS 完整安装包写入标准更新兼容标记。
- * @param {import('app-builder-lib').AfterPackContext} context Electron Builder 打包上下文。
- * @returns {Promise<void>} 安装标记写入完成后结束的 Promise。
- * @throws {Error} 无法创建或写入安装标记时抛出错误。
- */
-async function writeFullInstallInfo(context) {
-  if (!['darwin', 'win32'].includes(context.electronPlatformName)) return
-
-  // 标记必须位于最终 Resources 目录中，并在正式签名前完成写入。
-  const packageJson = require('../package.json')
-  const appId = 'top.z-tools'
-  let resourcesPath = ''
-  let updater = ''
-
-  if (context.electronPlatformName === 'darwin') {
-    const appName = context.packager.appInfo.productFilename
-    resourcesPath = path.join(context.appOutDir, `${appName}.app`, 'Contents', 'Resources')
-    updater = 'electron-updater-mac'
-  } else {
-    resourcesPath = path.join(context.appOutDir, 'resources')
-    updater = 'electron-updater-nsis'
-  }
-
-  const installInfo = {
-    schemaVersion: 1,
-    appId,
-    electronVersion: packageJson.devDependencies.electron,
-    updater
-  }
-  const installInfoPath = path.join(resourcesPath, 'ztools-install-info.json')
-
-  // 确保非标准框架输出也能创建标记目录。
-  await ensureDir(resourcesPath)
-  await fs.writeFile(installInfoPath, `${JSON.stringify(installInfo, null, 2)}\n`)
-  console.log(`已写入 ${context.electronPlatformName} 完整安装标记: ${installInfoPath}`)
-}
-
-/**
  * 按目标平台和架构移除不会被当前安装包加载的原生资源与预编译模块。
  * @param {import('app-builder-lib').AfterPackContext} context Electron Builder 打包上下文。
  * @returns {Promise<void>} 平台专属原生资源清理完成后结束的 Promise。
@@ -127,7 +89,7 @@ async function prunePlatformSpecificRuntimeFiles(context) {
 }
 
 /**
- * 完成 Electron Builder afterPack 阶段的资源清理、安装标记写入和内置插件复制。
+ * 完成 Electron Builder afterPack 阶段的资源清理和内置插件复制。
  * @param {import('app-builder-lib').AfterPackContext} context Electron Builder 打包上下文。
  * @returns {Promise<void>} 所有 afterPack 操作完成后结束的 Promise。
  * @throws {Error} 内置插件复制或其他必须的打包步骤失败时抛出错误。
@@ -258,15 +220,6 @@ module.exports = async function (context) {
   // 在签名前移除其他平台和架构的原生运行时文件。
   console.log('\n开始裁剪平台专属原生资源...')
   await prunePlatformSpecificRuntimeFiles(context)
-
-  // 写入完整安装标记，供标准更新器隔离 legacy ASAR 安装。
-  console.log('\n开始写入完整安装标记...')
-  try {
-    await writeFullInstallInfo(context)
-  } catch (err) {
-    console.error('写入完整安装标记失败:', err)
-    throw err
-  }
 
   // 复制内置插件
   console.log('\n开始复制内置插件...')

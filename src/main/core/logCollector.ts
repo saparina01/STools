@@ -176,7 +176,7 @@ class LogCollector {
 
   /**
    * 从日志数据中提取 source 前缀
-   * 匹配 [Sync]、[WebDAV]、[Updater] 等已有前缀
+   * 匹配形如 [Main]、[Plugin] 的已有前缀
    */
   private extractSource(data: any[]): { source: string; cleanMessage: string } {
     const firstArg = data[0]

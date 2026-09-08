@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  DEFAULT_AVATAR,
   DEFAULT_PLACEHOLDER,
   type AutoBackToSearchOption,
   type AutoClearOption,
@@ -174,7 +173,6 @@ const settingsLoaded = ref(false)
 const theme = ref<ThemeType>('system')
 const primaryColor = ref<PrimaryColor>('green')
 const placeholder = ref(DEFAULT_PLACEHOLDER)
-const avatar = ref(DEFAULT_AVATAR)
 const autoPaste = ref<AutoPasteOption>('3s')
 const autoClear = ref<AutoClearOption>('immediately')
 const autoBackToSearch = ref<AutoBackToSearchOption>('never')
@@ -303,9 +301,6 @@ const searchWallpaperFileName = computed(() => {
 // 颜色选择器引用
 const colorPickerInput = ref<HTMLInputElement | null>(null)
 
-// 自动检查更新（保留用于设置持久化）
-const autoCheckUpdate = ref(true)
-
 // 主题色选项
 const themeColors = [
   { label: '翡翠绿', value: 'green', hex: '#059669' },
@@ -317,9 +312,6 @@ const themeColors = [
 
 // 自定义颜色
 const customColor = ref('#db2777')
-
-// 头像默认值
-const defaultAvatar = DEFAULT_AVATAR
 
 // 搜索框提示文字默认值
 const defaultPlaceholder = DEFAULT_PLACEHOLDER
@@ -494,37 +486,6 @@ async function handleResetPlaceholder(): Promise<void> {
     console.log('搜索框提示文字已重置')
   } catch (error) {
     console.error('重置搜索框提示文字失败:', error)
-  }
-}
-
-// 选择头像
-async function handleSelectAvatar(): Promise<void> {
-  try {
-    const result = await window.ztools.internal.selectAvatar()
-    if (result.success && result.path) {
-      avatar.value = result.path
-      await saveSettings()
-      // 通知主渲染进程更新
-      await window.ztools.internal.updateAvatar(avatar.value)
-      console.log('头像已更新:', avatar.value)
-    } else if (result.error) {
-      console.error('选择头像失败:', result.error)
-    }
-  } catch (error) {
-    console.error('选择头像失败:', error)
-  }
-}
-
-// 重置头像
-async function handleResetAvatar(): Promise<void> {
-  try {
-    avatar.value = defaultAvatar
-    await saveSettings()
-    // 通知主渲染进程更新
-    await window.ztools.internal.updateAvatar(avatar.value)
-    console.log('头像已重置')
-  } catch (error) {
-    console.error('重置头像失败:', error)
   }
 }
 
@@ -1296,7 +1257,6 @@ async function loadSettings(): Promise<void> {
       hotkey.value = data.hotkey ?? defaultHotkey.value
       showTrayIcon.value = data.showTrayIcon ?? true
       placeholder.value = data.placeholder ?? DEFAULT_PLACEHOLDER
-      avatar.value = data.avatar ?? DEFAULT_AVATAR
       autoPaste.value = data.autoPaste ?? '3s'
       autoClear.value = data.autoClear ?? 'immediately'
       autoBackToSearch.value = data.autoBackToSearch ?? 'never'
@@ -1309,7 +1269,6 @@ async function loadSettings(): Promise<void> {
       theme.value = data.theme ?? 'system'
       primaryColor.value = data.primaryColor ?? 'green'
       searchMode.value = data.searchMode ?? 'aggregate'
-      autoCheckUpdate.value = data.autoCheckUpdate ?? true
       tabKeyFunction.value =
         data.tabKeyFunction ?? (data.tabTargetCommand ? 'target-command' : 'navigate')
       // Tab 键目标指令
@@ -1380,9 +1339,6 @@ async function loadSettings(): Promise<void> {
  */
 async function saveSettings(): Promise<void> {
   try {
-    // 只有自定义头像才保存到数据库，默认头像不保存
-    const avatarToSave = avatar.value === defaultAvatar ? undefined : avatar.value
-
     // 先读取现有设置，保留本页不管理的字段（如 builtinAppShortcutsEnabled）
     const existing = (await window.ztools.internal.dbGet('settings-general')) || {}
 
@@ -1392,7 +1348,6 @@ async function saveSettings(): Promise<void> {
       windowDefaultHeight: windowDefaultHeight.value,
       hotkey: hotkey.value,
       placeholder: placeholder.value,
-      avatar: avatarToSave,
       autoPaste: autoPaste.value,
       autoClear: autoClear.value,
       autoBackToSearch: autoBackToSearch.value,
@@ -1430,7 +1385,6 @@ async function saveSettings(): Promise<void> {
       customInternalApiPluginNames: [...customInternalApiPluginNames.value],
       proxyEnabled: proxyEnabled.value,
       proxyUrl: proxyUrl.value,
-      autoCheckUpdate: autoCheckUpdate.value,
       clipboardRetentionDays: clipboardRetentionDays.value,
       terminal: terminal.value,
       terminalCustomCommand: terminalCustomCommand.value
@@ -1701,7 +1655,7 @@ onUnmounted(() => {
       <div class="setting-item wallpaper-setting-item">
         <div class="setting-label">
           <span>主搜索窗口壁纸</span>
-          <span class="setting-desc">图片副本保存在 .ztools/avatar，超宽图片会自动压缩</span>
+          <span class="setting-desc">图片副本保存在 .ztools/assets，超宽图片会自动压缩</span>
         </div>
         <div class="setting-control wallpaper-control">
           <div v-if="searchWallpaper" class="wallpaper-preview-wrapper">
@@ -1824,45 +1778,6 @@ onUnmounted(() => {
             class="btn btn-icon"
             title="重置"
             @click="handleResetPlaceholder"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="1 0 18 18"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                d="M14.5 9C14.5 11.4853 12.4853 13.5 10 13.5C7.51472 13.5 5.5 11.4853 5.5 9C5.5 6.51472 7.51472 4.5 10 4.5C11.6569 4.5 13.0943 5.41421 13.8536 6.75M14 4V7H11"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <div class="setting-item">
-        <div class="setting-label">
-          <span>搜索框头像</span>
-          <span class="setting-desc">自定义搜索框右侧显示的头像</span>
-        </div>
-        <div class="setting-control avatar-control">
-          <img
-            v-if="avatar"
-            :src="avatar"
-            :class="['avatar-preview', { 'default-avatar': avatar === defaultAvatar }]"
-            alt="头像预览"
-            draggable="false"
-          />
-          <button class="btn" @click="handleSelectAvatar">选择图片</button>
-          <button
-            v-if="avatar !== defaultAvatar"
-            class="btn btn-icon"
-            title="重置"
-            @click="handleResetAvatar"
           >
             <svg
               width="20"
@@ -2730,21 +2645,6 @@ onUnmounted(() => {
 /* 文本输入框 - 只设置布局，颜色由 global.css 控制 */
 :deep(.input) {
   min-width: 250px;
-}
-
-/* 头像控制 */
-.avatar-control {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.avatar-preview {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid var(--control-border);
 }
 
 /* 颜色选择器 */

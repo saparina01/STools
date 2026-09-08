@@ -19,8 +19,6 @@ export interface UsePluginDetailOptions {
   isRunning?: Ref<boolean | undefined>
   /** 是否显示详情/README Tab */
   showDetail?: boolean
-  /** 是否显示留言 Tab */
-  showComments?: boolean
   /** 是否显示指令列表 Tab */
   showCommands?: boolean
   /** 是否显示插件数据 Tab */
@@ -40,7 +38,6 @@ export function usePluginDetail(options: UsePluginDetailOptions) {
     plugin,
     isRunning,
     showDetail = true,
-    showComments = false,
     showCommands = true,
     showData = true,
     initialTab = 'detail'
@@ -231,10 +228,6 @@ export function usePluginDetail(options: UsePluginDetailOptions) {
 
     if (showData && plugin.value.installed) {
       tabs.push({ id: 'data', label: '数据' })
-    }
-
-    if (showComments) {
-      tabs.push({ id: 'comments', label: '留言' })
     }
 
     return tabs

@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
-import defaultAvatar from '../assets/image/default.png'
+import { ref } from 'vue'
 import { normalizeSearchWallpaperConfig, type SearchWallpaperConfig } from '@shared/searchWallpaper'
 
 interface WindowInfo {
@@ -29,7 +28,6 @@ interface PluginInfo {
 }
 
 export const DEFAULT_PLACEHOLDER = '搜索应用和指令 / 粘贴文件或图片'
-export const DEFAULT_AVATAR = defaultAvatar
 
 // 自动粘贴选项
 export type AutoPasteOption = 'off' | '1s' | '3s' | '5s' | '10s'
@@ -42,13 +40,6 @@ export type SearchMode = 'aggregate' | 'list'
 export type TabKeyFunction = 'navigate' | 'target-command'
 export type BuiltInShortcutKey = 'search' | 'closePlugin' | 'killPlugin' | 'esc'
 
-// 更新状态
-interface AvailableUpdateInfo {
-  hasUpdate: boolean
-  version?: string
-  changelog?: string
-}
-
 // AI 请求状态
 export type AiRequestStatus = 'idle' | 'sending' | 'receiving'
 
@@ -58,7 +49,6 @@ export const useWindowStore = defineStore('window', () => {
 
   // 搜索框配置
   const placeholder = ref(DEFAULT_PLACEHOLDER)
-  const avatar = ref(DEFAULT_AVATAR)
 
   // Tab 键目标指令
   const tabTargetCommand = ref('')
@@ -114,20 +104,6 @@ export const useWindowStore = defineStore('window', () => {
   const searchWallpaper = ref<SearchWallpaperConfig | null>(null)
   let searchWallpaperValidationId = 0
 
-  // 更新状态
-  const availableUpdateInfo = ref<AvailableUpdateInfo>({ hasUpdate: false })
-  const autoCheckUpdateEnabled = ref(true)
-  const dismissedUpdateVersion = ref<string | null>(null)
-  const shouldShowUpdateNotification = computed(() => {
-    const availableVersion = availableUpdateInfo.value.version ?? ''
-    return (
-      availableUpdateInfo.value.hasUpdate &&
-      autoCheckUpdateEnabled.value &&
-      !currentPlugin.value &&
-      availableVersion !== dismissedUpdateVersion.value
-    )
-  })
-
   // 更新窗口信息
   function updateWindowInfo(windowInfo: WindowInfo | null): void {
     currentWindow.value = windowInfo
@@ -136,11 +112,6 @@ export const useWindowStore = defineStore('window', () => {
   // 更新 placeholder
   function updatePlaceholder(value: string): void {
     placeholder.value = value || DEFAULT_PLACEHOLDER
-  }
-
-  // 更新 avatar
-  function updateAvatar(value: string): void {
-    avatar.value = value || DEFAULT_AVATAR
   }
 
   // 更新当前插件信息
@@ -546,53 +517,6 @@ export const useWindowStore = defineStore('window', () => {
     return elapsedTime >= timeLimit
   }
 
-  // 设置可用更新信息
-  function setAvailableUpdateInfo(info: AvailableUpdateInfo): void {
-    availableUpdateInfo.value = info
-  }
-
-  /**
-   * 更新自动检查开关的运行时状态，并在重新开启时允许更新提示再次出现。
-   * @param enabled 是否启用自动检查更新
-   * @returns 无返回值
-   */
-  function updateAutoCheckUpdateEnabled(enabled: boolean): void {
-    autoCheckUpdateEnabled.value = enabled
-
-    // 用户主动重新开启自动检查时，清除本次运行的旧关闭记录。
-    if (enabled) dismissedUpdateVersion.value = null
-  }
-
-  /**
-   * 关闭当前版本的主窗口更新提示，关闭状态仅保留到本次应用退出。
-   * @returns 无返回值
-   */
-  function dismissUpdateNotification(): void {
-    dismissedUpdateVersion.value = availableUpdateInfo.value.version ?? ''
-  }
-
-  /**
-   * 在自动检查开启时恢复主进程中已检测到的更新状态。
-   * @returns 状态检查完成后结束的 Promise
-   */
-  async function checkUpdateStatus(): Promise<void> {
-    // 自动检查关闭时不恢复缓存提示，手动检查更新功能仍保持可用。
-    if (!autoCheckUpdateEnabled.value) return
-
-    try {
-      const status = await window.ztools.updater.getDownloadStatus()
-      if (status.hasUpdate) {
-        availableUpdateInfo.value = {
-          hasUpdate: true,
-          version: status.version,
-          changelog: status.changelog
-        }
-      }
-    } catch (error) {
-      console.error('检查更新状态失败:', error)
-    }
-  }
-
   // 更新 AI 请求状态
   function setAiRequestStatus(status: AiRequestStatus): void {
     aiRequestStatus.value = status
@@ -609,20 +533,11 @@ export const useWindowStore = defineStore('window', () => {
         if (data.placeholder) {
           placeholder.value = data.placeholder
         }
-        // 只有自定义头像才从数据库加载
-        // 如果数据库中是默认头像路径（历史数据），不加载，使用内置的默认头像
-        if (data.avatar && data.avatar !== DEFAULT_AVATAR) {
-          avatar.value = data.avatar
-        }
-        // 否则使用内置的默认头像（已在初始化时设置）
         if (data.autoPaste) {
           autoPaste.value = data.autoPaste
         }
         if (data.autoClear) {
           autoClear.value = data.autoClear
-        }
-        if (data.autoCheckUpdate !== undefined) {
-          autoCheckUpdateEnabled.value = data.autoCheckUpdate
         }
         if (data.theme) {
           theme.value = data.theme
@@ -698,7 +613,6 @@ export const useWindowStore = defineStore('window', () => {
   return {
     currentWindow,
     placeholder,
-    avatar,
     currentPlugin,
     pluginLoading,
     aiRequestStatus,
@@ -714,12 +628,8 @@ export const useWindowStore = defineStore('window', () => {
     acrylicLightOpacity,
     acrylicDarkOpacity,
     searchWallpaper,
-    availableUpdateInfo,
-    autoCheckUpdateEnabled,
-    shouldShowUpdateNotification,
     updateWindowInfo,
     updatePlaceholder,
-    updateAvatar,
     updateCurrentPlugin,
     setPluginLoading,
     setAiRequestStatus,
@@ -757,10 +667,6 @@ export const useWindowStore = defineStore('window', () => {
     getAutoPasteTimeLimit,
     getAutoClearTimeLimit,
     shouldClearSearch,
-    setAvailableUpdateInfo,
-    updateAutoCheckUpdateEnabled,
-    dismissUpdateNotification,
-    checkUpdateStatus,
     loadSettings
   }
 })

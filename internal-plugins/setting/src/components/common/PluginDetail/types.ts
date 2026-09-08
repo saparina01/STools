@@ -29,7 +29,7 @@ export interface DocItem {
   type: 'document' | 'attachment'
 }
 
-export type TabId = 'detail' | 'commands' | 'data' | 'comments'
+export type TabId = 'detail' | 'commands' | 'data'
 
 export interface TabItem {
   id: TabId

@@ -1,35 +1,28 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { app } from 'electron'
 
 export interface AppDataPathOptions {
   dataRoot?: string
   homeDir?: string
-  legacyUserDataPath?: string
 }
 
 export interface ZToolsDataLayout {
   root: string
   lmdbRoot: string
-  deviceLmdbPath: string
-  accountsRoot: string
-  defaultAccountLmdbPath: string
+  localLmdbPath: string
   pluginsPath: string
-  avatarPath: string
+  assetsPath: string
   clipboardPath: string
   extendsPath: string
   tempPath: string
   logsPath: string
-  legacyLmdbPath: string
-  legacyUserDataPath: string
 }
 
 /**
- * 获取 ZTools 数据根目录，测试进程可通过显式配置隔离真实用户数据。
- *
- * @param options 数据目录解析选项。
- * @returns ZTools 数据根目录绝对路径。
+ * 解析 ZTools 本地数据根目录。
+ * @param options 测试或特殊运行环境使用的路径覆盖项。
+ * @returns 数据根目录绝对路径。
  */
 export function getZToolsRoot(options: AppDataPathOptions = {}): string {
   return (
@@ -39,112 +32,106 @@ export function getZToolsRoot(options: AppDataPathOptions = {}): string {
   )
 }
 
-export function getLmdbRoot(options: AppDataPathOptions = {}): string {
-  return path.join(getZToolsRoot(options), 'lmdb')
+/**
+ * 解析单一 LMDB 环境路径。
+ * @param options 路径覆盖项。
+ * @returns `.ztools/lmdb/local` 绝对路径。
+ */
+export function getLocalLmdbPath(options: AppDataPathOptions = {}): string {
+  return path.join(getZToolsRoot(options), 'lmdb', 'local')
 }
 
-export function getDeviceLmdbPath(options: AppDataPathOptions = {}): string {
-  return path.join(getLmdbRoot(options), 'device')
-}
-
-export function getAccountsRoot(options: AppDataPathOptions = {}): string {
-  return path.join(getLmdbRoot(options), 'accounts')
-}
-
-export function getDefaultAccountLmdbPath(options: AppDataPathOptions = {}): string {
-  return path.join(getAccountsRoot(options), 'default')
-}
-
+/**
+ * 解析插件安装目录。
+ * @param options 路径覆盖项。
+ * @returns 插件目录。
+ */
 export function getPluginsPath(options: AppDataPathOptions = {}): string {
   return path.join(getZToolsRoot(options), 'plugins')
 }
 
-export function getAvatarPath(options: AppDataPathOptions = {}): string {
-  return path.join(getZToolsRoot(options), 'avatar')
+/**
+ * 解析本地托管资源目录。
+ * @param options 路径覆盖项。
+ * @returns 托管资源目录。
+ */
+export function getAssetsPath(options: AppDataPathOptions = {}): string {
+  return path.join(getZToolsRoot(options), 'assets')
 }
 
+/**
+ * 解析剪贴板资源目录。
+ * @param options 路径覆盖项。
+ * @returns 剪贴板资源目录。
+ */
 export function getClipboardPath(options: AppDataPathOptions = {}): string {
   return path.join(getZToolsRoot(options), 'clipboard')
 }
 
+/**
+ * 解析扩展资源目录。
+ * @param options 路径覆盖项。
+ * @returns 扩展资源目录。
+ */
 export function getExtendsPath(options: AppDataPathOptions = {}): string {
   return path.join(getZToolsRoot(options), 'extends')
 }
 
+/**
+ * 解析临时目录。
+ * @param options 路径覆盖项。
+ * @returns 临时目录。
+ */
 export function getTempPath(options: AppDataPathOptions = {}): string {
   return path.join(getZToolsRoot(options), 'temp')
 }
 
+/**
+ * 解析日志目录。
+ * @param options 路径覆盖项。
+ * @returns 日志目录。
+ */
 export function getLogsPath(options: AppDataPathOptions = {}): string {
   return path.join(getZToolsRoot(options), 'logs')
 }
 
-export function getLegacyUserDataPath(options: AppDataPathOptions = {}): string {
-  return options.legacyUserDataPath || getDefaultLegacyUserDataPath(options)
-}
-
-export function getLegacyLmdbPath(options: AppDataPathOptions = {}): string {
-  return path.join(getLegacyUserDataPath(options), 'lmdb')
-}
-
+/**
+ * 构造单机数据布局。
+ * @param options 路径覆盖项。
+ * @returns 所有本地数据目录。
+ */
 export function getZToolsDataLayout(options: AppDataPathOptions = {}): ZToolsDataLayout {
+  const root = getZToolsRoot(options)
   return {
-    root: getZToolsRoot(options),
-    lmdbRoot: getLmdbRoot(options),
-    deviceLmdbPath: getDeviceLmdbPath(options),
-    accountsRoot: getAccountsRoot(options),
-    defaultAccountLmdbPath: getDefaultAccountLmdbPath(options),
+    root,
+    lmdbRoot: path.join(root, 'lmdb'),
+    localLmdbPath: getLocalLmdbPath(options),
     pluginsPath: getPluginsPath(options),
-    avatarPath: getAvatarPath(options),
+    assetsPath: getAssetsPath(options),
     clipboardPath: getClipboardPath(options),
     extendsPath: getExtendsPath(options),
     tempPath: getTempPath(options),
-    logsPath: getLogsPath(options),
-    legacyLmdbPath: getLegacyLmdbPath(options),
-    legacyUserDataPath: getLegacyUserDataPath(options)
+    logsPath: getLogsPath(options)
   }
 }
 
-export function hasZToolsRoot(options: AppDataPathOptions = {}): boolean {
-  return fs.existsSync(getZToolsRoot(options))
-}
-
-export function hasLegacyLmdb(options: AppDataPathOptions = {}): boolean {
-  return fs.existsSync(getLegacyLmdbPath(options))
-}
-
-export function ensure3Layout(options: AppDataPathOptions = {}): ZToolsDataLayout {
+/**
+ * 创建单机运行所需的目录。
+ * @param options 路径覆盖项。
+ * @returns 已创建的数据布局。
+ */
+export function ensureLocalLayout(options: AppDataPathOptions = {}): ZToolsDataLayout {
   const layout = getZToolsDataLayout(options)
-  fs.mkdirSync(layout.deviceLmdbPath, { recursive: true })
-  fs.mkdirSync(layout.defaultAccountLmdbPath, { recursive: true })
-  fs.mkdirSync(layout.pluginsPath, { recursive: true })
-  fs.mkdirSync(layout.avatarPath, { recursive: true })
-  fs.mkdirSync(layout.clipboardPath, { recursive: true })
-  fs.mkdirSync(layout.extendsPath, { recursive: true })
-  fs.mkdirSync(layout.tempPath, { recursive: true })
-  fs.mkdirSync(layout.logsPath, { recursive: true })
+  for (const directory of [
+    layout.localLmdbPath,
+    layout.pluginsPath,
+    layout.assetsPath,
+    layout.clipboardPath,
+    layout.extendsPath,
+    layout.tempPath,
+    layout.logsPath
+  ]) {
+    fs.mkdirSync(directory, { recursive: true })
+  }
   return layout
-}
-
-function getDefaultLegacyUserDataPath(options: AppDataPathOptions): string {
-  if (process.env.ZTOOLS_LEGACY_USER_DATA_PATH) {
-    return process.env.ZTOOLS_LEGACY_USER_DATA_PATH
-  }
-  try {
-    const userData = app?.getPath?.('userData')
-    if (userData) return userData
-  } catch {
-    // fall back to the production macOS path below
-  }
-
-  if (process.platform === 'darwin') {
-    return path.join(options.homeDir || os.homedir(), 'Library', 'Application Support', 'ZTools')
-  }
-  if (process.platform === 'win32') {
-    return path.join(
-      process.env.APPDATA || path.join(options.homeDir || os.homedir(), 'AppData', 'Roaming'),
-      'ZTools'
-    )
-  }
-  return path.join(options.homeDir || os.homedir(), '.config', 'ZTools')
 }

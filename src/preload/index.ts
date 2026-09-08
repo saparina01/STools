@@ -12,32 +12,6 @@ export interface Command {
   persistedName?: string
 }
 
-export interface PluginUpdateCheckResult {
-  success: boolean
-  updateAvailable: boolean
-  currentVersion?: string
-  latestVersion?: string
-  plugin?: {
-    name: string
-    version: string
-    title?: string
-    logo?: string
-    updatedAt?: number
-  }
-  reason?: string
-  error?: string
-}
-
-export interface PluginMarketDownloadProgress {
-  pluginName: string
-  taskId: string
-  status: 'downloading' | 'installing' | 'success' | 'error' | 'cancelled'
-  progress: number | null
-  receivedBytes?: number
-  totalBytes?: number
-  error?: string
-}
-
 const api = {
   getApps: () => ipcRenderer.invoke('get-apps'),
   getSystemSettings: () => ipcRenderer.invoke('get-system-settings'),
@@ -83,46 +57,6 @@ const api = {
     ipcRenderer.invoke('set-plugin-main-push-enabled', pluginName, enabled),
   killPluginAndReturn: (pluginPath: string) =>
     ipcRenderer.invoke('kill-plugin-and-return', pluginPath),
-  pluginUpdates: {
-    /**
-     * 检查当前插件是否存在市场新版本。
-     * @param pluginName 当前插件名称
-     * @param pluginPath 当前插件物理路径
-     * @returns 更新检查结果
-     */
-    check: (pluginName: string, pluginPath: string): Promise<PluginUpdateCheckResult> =>
-      ipcRenderer.invoke('check-plugin-update', pluginName, pluginPath),
-    /**
-     * 从插件市场升级指定插件。
-     * @param pluginName 需要升级的插件名称
-     * @param pluginPath 当前插件物理路径
-     * @returns 安装结果
-     */
-    upgrade: (pluginName: string, pluginPath: string): Promise<any> =>
-      ipcRenderer.invoke('upgrade-plugin-from-market', pluginName, pluginPath),
-    /**
-     * 打开指定插件的市场详情页。
-     * @param pluginName 需要查看的插件名称
-     * @returns 打开结果
-     */
-    openMarket: (pluginName: string): Promise<{ success: boolean; error?: string }> =>
-      ipcRenderer.invoke('open-plugin-market-detail', pluginName),
-    /**
-     * 监听当前窗口发起的市场升级进度。
-     * @param callback 接收下载和安装进度的回调函数
-     * @returns 用于移除监听器的清理函数
-     */
-    onProgress: (callback: (payload: PluginMarketDownloadProgress) => void): (() => void) => {
-      const handler = (
-        _event: Electron.IpcRendererEvent,
-        payload: PluginMarketDownloadProgress
-      ): void => callback(payload)
-      ipcRenderer.on('plugin-market-download-progress', handler)
-      return (): void => {
-        ipcRenderer.removeListener('plugin-market-download-progress', handler)
-      }
-    }
-  },
   // mainPush 功能
   queryMainPush: (pluginPath: string, featureCode: string, queryData: any) =>
     ipcRenderer.invoke('query-main-push', pluginPath, featureCode, queryData),
@@ -235,9 +169,6 @@ const api = {
   },
   onUpdatePlaceholder: (callback: (placeholder: string) => void) => {
     ipcRenderer.on('update-placeholder', (_event, placeholder) => callback(placeholder))
-  },
-  onUpdateAvatar: (callback: (avatar: string) => void) => {
-    ipcRenderer.on('update-avatar', (_event, avatar) => callback(avatar))
   },
   /**
    * 监听主搜索窗口壁纸的实时配置更新。
@@ -378,45 +309,6 @@ const api = {
   // 数据库相关（主程序专用，直接操作 ZTOOLS 命名空间）
   dbPut: (key: string, data: any) => ipcRenderer.invoke('ztools:db-put', key, data),
   dbGet: (key: string) => ipcRenderer.invoke('ztools:db-get', key),
-  // 软件更新
-  updater: {
-    checkUpdate: () => ipcRenderer.invoke('updater:check-update'),
-    showUpdateWindow: () => ipcRenderer.invoke('updater:show-update-window'),
-    startUpdate: (sourceID?: number) => ipcRenderer.invoke('updater:start-update', sourceID),
-    /**
-     * 取消当前正在进行的应用更新下载。
-     * @returns 主进程确认下载已停止后的结果。
-     */
-    cancelUpdate: () => ipcRenderer.invoke('updater:cancel-update'),
-    openDownloadSource: (sourceID: number) =>
-      ipcRenderer.invoke('updater:open-download-source', sourceID),
-    installDownloadedUpdate: () => ipcRenderer.invoke('updater:install-downloaded-update'),
-    getDownloadStatus: () => ipcRenderer.invoke('updater:get-download-status')
-  },
-  onUpdateAvailable: (callback: (data: { version: string; changelog: string }) => void) => {
-    ipcRenderer.on('update-available', (_event, data) => callback(data))
-  },
-  /**
-   * 监听自动检查更新开关变化。
-   * @param callback 接收最新开关状态的回调函数
-   * @returns 用于移除当前监听器的清理函数
-   */
-  onAutoCheckUpdateChanged: (callback: (enabled: boolean) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, enabled: boolean): void => callback(enabled)
-    ipcRenderer.on('auto-check-update-changed', handler)
-    return (): void => {
-      ipcRenderer.removeListener('auto-check-update-changed', handler)
-    }
-  },
-  onUpdateDownloaded: (callback: (data: { version: string; changelog: string }) => void) => {
-    ipcRenderer.on('update-downloaded', (_event, data) => callback(data))
-  },
-  onUpdateDownloadStart: (callback: (data: { version: string }) => void) => {
-    ipcRenderer.on('update-download-start', (_event, data) => callback(data))
-  },
-  onUpdateDownloadFailed: (callback: (data: { error: string }) => void) => {
-    ipcRenderer.on('update-download-failed', (_event, data) => callback(data))
-  },
   // 获取系统平台 (darwin, win32, linux)
   getPlatform: () => ipcRenderer.sendSync('get-platform'),
   // 上次匹配状态管理
@@ -599,20 +491,6 @@ declare global {
         enabled: boolean
       ) => Promise<{ success: boolean; error?: string }>
       killPluginAndReturn: (pluginPath: string) => Promise<{ success: boolean; error?: string }>
-      pluginUpdates: {
-        check: (pluginName: string, pluginPath: string) => Promise<PluginUpdateCheckResult>
-        upgrade: (
-          pluginName: string,
-          pluginPath: string
-        ) => Promise<{
-          success: boolean
-          error?: string
-          plugin?: any
-          cancelled?: boolean
-        }>
-        openMarket: (pluginName: string) => Promise<{ success: boolean; error?: string }>
-        onProgress: (callback: (payload: PluginMarketDownloadProgress) => void) => () => void
-      }
       // mainPush 功能
       queryMainPush: (
         pluginPath: string,
@@ -734,7 +612,6 @@ declare global {
       onUpdateSpaceOpenCommand: (callback: (enabled: boolean) => void) => void
       onUpdateShowRecentInSearch: (callback: (showRecentInSearch: boolean) => void) => void
       onUpdateMatchRecommendation: (callback: (showMatchRecommendation: boolean) => void) => void
-      onAutoCheckUpdateChanged: (callback: (enabled: boolean) => void) => () => void
       // 数据库相关（主程序专用，直接操作 ZTOOLS 命名空间）
       dbPut: (key: string, data: any) => Promise<any>
       dbGet: (key: string) => Promise<any>
